@@ -44,15 +44,19 @@ import           Control.Monad.Freer.Extras           as Extras
 
 -- DATA TYPES -- 
 
-data MatchBet = Win | Draw | Loss
+data MatchBet = Win | Draw | Loss | Unknown
     deriving stock (Show, Generic)
     deriving anyclass (ToJSON, FromJSON, ToSchema)
-PlutusTx.makeIsDataIndexed ''MatchBet [('Win,0), ('Draw,1), ('Loss,2)]
 
-data MatchResult = MatchBet | NoResult
-    deriving stock (Show, Generic)
-    deriving anyclass (ToJSON, FromJSON, ToSchema)
-PlutusTx.makeIsDataIndexed ''MatchResult [('MatchBet,0), ('NoResult,1)]
+instance Eq MatchBet where
+    {-# INLINABLE (==) #-}
+    Win     == Win      = True
+    Draw    == Draw     = True
+    Loss    == Loss     = True
+    Unknown == Unknown  = True
+    _       == _        = False
+
+PlutusTx.makeIsDataIndexed ''MatchBet [('Win,0), ('Draw,1), ('Loss,2), ('Unknown,3)]
 
 
 data BetStatus = AwaitingBet | AwaitingResult 
@@ -72,10 +76,11 @@ data BetDatum =
         d_matchID     :: Builtins.BuiltinByteString,
         d_closedAt    :: Slot,
         d_resultAt    :: Slot,
-        d_result      :: MatchResult,
+        d_result      :: MatchBet,
         d_creatorbet  :: MatchBet,
         d_odds        :: Integer,
         d_amount      :: Integer,
+        d_fee         :: Integer,
         d_creator     :: PaymentPubKeyHash,
         d_acceptor    :: PaymentPubKeyHash,
         d_status      :: BetStatus
@@ -90,9 +95,9 @@ data BetReedemer =
     } | BetReedemerOracle
     {
         r_matchID     :: Builtins.BuiltinByteString,
-        r_result      :: MatchResult
+        r_result      :: MatchBet
     }
-PlutusTx.makeIsDataIndexed ''BetReedemer [('BetReedemerAccept,0),('BetReedemerOracle,0)]
+PlutusTx.makeIsDataIndexed ''BetReedemer [('BetReedemerAccept,0),('BetReedemerOracle,1)]
 
 data BetType
 instance Scripts.ValidatorTypes BetType where
@@ -145,7 +150,7 @@ data AcceptParams =
 data OracleParams =
     OracleParams {
         oracle_matchID     :: Builtins.BuiltinByteString,
-        oracle_result      :: MatchResult
+        oracle_result      :: MatchBet
         }
         deriving stock (Show, Generic)
         deriving anyclass (ToJSON, FromJSON, ToSchema)
@@ -157,13 +162,12 @@ redeemerMatchingUtxo r o = case _ciTxOutDatum o of
     Left _          -> False
     Right (Datum d) -> case PlutusTx.fromBuiltinData d of
         Nothing -> False
-        Just d2 ->     case r of
-            (BetReedemerAccept _ _) -> (r_matchID r == (d_matchID $ d2)) &&
-                                   (r_creator r == (d_creator $ d2)) &&
-                                   ((d_status d2) == AwaitingBet)
-
-            (BetReedemerOracle _ _) -> (r_matchID r == (d_matchID $ d2)) &&
-                                   ((d_status d2) == AwaitingResult)
+        Just d2 -> case r of
+                    (BetReedemerAccept _ _) -> (r_matchID r == (d_matchID d2)) &&
+                                               (r_creator r == (d_creator d2)) &&
+                                               ((d_status d2) == AwaitingBet)
+                    (BetReedemerOracle _ _) -> (r_matchID r == (d_matchID d2)) &&
+                                               ((d_status d2) == AwaitingResult)
 
 
 acceptSlotMatchingUtxo :: Slot -> ChainIndexTxOut -> Bool
@@ -190,15 +194,22 @@ getTxDatum o = case _ciTxOutDatum o of
         Nothing -> Plutus.Contract.throwError $ pack $ printf "Error Decoding Datum"
         Just d2 -> return d2
 
-getResultTx :: ChainIndexTxOut -> MatchResult -> Contract w s Text (PaymentPubKeyHash, Integer)
-getResultTx o mr = do
+getResultTx ::  MatchBet -> ChainIndexTxOut -> Contract w s Text (PaymentPubKeyHash, Integer)
+getResultTx mr o = do
     datum <- getTxDatum o
     let amount = PlutusTx.Prelude.divide ((d_amount datum) * (d_odds datum)) 100
     case mr of
-        NoResult -> Plutus.Contract.throwError $ pack $ printf "No match result provided"
-        MatchResult _ -> if d_creatorbet datum == MatchBet
-            then return (d_creator, amount)
-            else return (d_acceptor, amount)
+        Unknown -> Plutus.Contract.throwError $ pack $ printf "No match result provided"
+        _ -> if d_creatorbet datum == mr
+            then return (d_creator datum, amount)
+            else return (d_acceptor datum, amount)
+
+getFeeTx :: ChainIndexTxOut -> Contract w s Text Integer
+getFeeTx o = do
+    datum <- getTxDatum o
+    let fees = d_fee datum
+    return fees
+
 
 
 acceptParamsToRedeemer :: AcceptParams -> BetReedemer
@@ -216,15 +227,16 @@ create param = do
         d_matchID     = create_matchID param,
         d_closedAt    = create_closedAt param,
         d_resultAt    = create_resultAt param,
-        d_result      = NoResult,
+        d_result      = Unknown,
         d_creatorbet  = create_creatorbet param ,
         d_odds        = create_odds param,
         d_amount      = create_amount param ,
+        d_fee         = PlutusTx.Prelude.divide (create_amount param * 5) 100 + 2000000,
         d_creator     = pkh,
         d_acceptor    = pkh,
         d_status      = AwaitingBet
       }
-    let tx = mustPayToTheScript datum (Ada.lovelaceValueOf $ create_amount param)
+    let tx = mustPayToTheScript datum (Ada.lovelaceValueOf $ (d_amount datum + d_fee datum))
     ledgerTx <- submitTxConstraints tValidator tx
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx                                  
     Plutus.Contract.logInfo @String $ printf "Bet Initialized"
@@ -241,7 +253,7 @@ accept param = do
     input_datum <- getTxDatum $ snd input
     let output_datum = input_datum{d_acceptor = pkh, d_status = AwaitingResult}
     let tx = mustSpendScriptOutput (fst input) (Redeemer $ PlutusTx.toBuiltinData redeemer) <>
-             mustPayToTheScript output_datum (Ada.lovelaceValueOf $ (PlutusTx.Prelude.divide ((d_amount output_datum) * (d_odds output_datum)) 100)+1)
+             mustPayToTheScript (output_datum) (Ada.lovelaceValueOf $ (PlutusTx.Prelude.divide ((d_amount output_datum) * (d_odds output_datum)) 100)+1+ (d_fee output_datum))
     let lookups = Constraints.unspentOutputs accepted_utxos   <> 
                   Constraints.typedValidatorLookups tValidator <> 
                   Constraints.otherScript validator                                                                               
@@ -254,16 +266,23 @@ oracle :: AsContractError Text => OracleParams -> Contract w s Text ()
 oracle param = do
     utxos <- utxosAt scrAddress
     let redeemer = oracleParamsToRedeemer param
-    let accepted_utxos = Map.toList $ Map.filter (redeemerMatchingUtxo redeemer) utxos                                              
-    let input_utxos = case accepted_utxos of
+    let accepted_utxos_map = Map.filter (redeemerMatchingUtxo redeemer) utxos  
+    let accepted_utxos = Map.toList $ accepted_utxos_map                                            
+    input_utxos <- case accepted_utxos of
                         [] -> Plutus.Contract.throwError $ pack $ printf "No UTXO found"
-                        _ -> accepted_tx
-    let tx_script  = mconcat [mustSpendScriptOutput oref (Redeemer $ PlutusTx.toBuiltinData redeemer) | oref <- fst <$> input_utxos]
-    let tx_output  = mconcat [mustPayToPubKey  (fst otx) (Ada.lovelaceValueOf (snd otx)) | otx <- (getResultTx . snd) <$> input_utxos]
-    let lookups = Constraints.unspentOutputs accepted_utxos   <> 
+                        _ -> return accepted_utxos
+    let txcons_script  = mconcat [mustSpendScriptOutput oref (Redeemer $ PlutusTx.toBuiltinData redeemer) | oref <- fst <$> input_utxos]
+
+    tx_outputvalues <- PlutusTx.Prelude.mapM ((getResultTx (r_result redeemer) ). snd) input_utxos
+    let txcons_output  = mconcat [mustPayToPubKey  (fst otx) (Ada.lovelaceValueOf (snd otx)) | otx <- tx_outputvalues]
+
+    tx_outputfees <- PlutusTx.Prelude.mapM (getFeeTx . snd) input_utxos
+    let txfee_output = mconcat [mustPayToPubKey  (mockWalletPaymentPubKeyHash $ knownWallet 5) (Ada.lovelaceValueOf otx) | otx <- tx_outputfees]
+
+    let lookups = Constraints.unspentOutputs accepted_utxos_map   <> 
                   Constraints.typedValidatorLookups tValidator <> 
                   Constraints.otherScript validator                                                                               
-    ledgerTx <- submitTxConstraintsWith @BetType lookups (tx_script <> tx_output)                         
+    ledgerTx <- submitTxConstraintsWith @BetType lookups (txcons_script <> txcons_output <> txfee_output)                         
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx                                               
     Plutus.Contract.logInfo @String $ "Bet Accepted"      
 
@@ -291,17 +310,82 @@ mkSchemaDefinitions ''BettingSchema
 $(mkKnownCurrencies [])
 
 
-main :: IO ()
-main = runEmulatorTraceIO $ do
-    h1 <- activateContractWallet (knownWallet 1) endpoints
-    h2 <- activateContractWallet (knownWallet 2) endpoints
-    h3 <- activateContractWallet (knownWallet 3) endpoints
-    h4 <- activateContractWallet (knownWallet 4) endpoints
-    callEndpoint @"create" h1 $ CreateParams {
-        create_matchID     = "hello",
-        create_closedAt    = 5,
-        create_resultAt    = 7,
+
+
+
+
+
+
+test1 :: IO ()
+test1 = runEmulatorTraceIO $ do
+    better1_wallet <- activateContractWallet (knownWallet 1) endpoints
+    acceptor1_wallet <- activateContractWallet (knownWallet 2) endpoints
+    oracle_wallet <- activateContractWallet (knownWallet 5) endpoints
+    
+    
+    callEndpoint @"create" better1_wallet $ CreateParams {
+        create_matchID     = "48656c6c6f204c6f727973",
+        create_closedAt    = 10,
+        create_resultAt    = 20,
         create_creatorbet  = Win,
         create_odds        = 150,
         create_amount      = 50000000
+        }
+    void $ Emulator.waitNSlots 3
+    callEndpoint @"accept" acceptor1_wallet $ AcceptParams {
+        accept_matchID     = "48656c6c6f204c6f727973",
+        accept_creator     = mockWalletPaymentPubKeyHash (knownWallet 1)
         } 
+    void $ Emulator.waitNSlots 20
+    callEndpoint @"oracle" oracle_wallet $ OracleParams {
+        oracle_matchID     = "48656c6c6f204c6f727973",
+        oracle_result     = Loss
+        }  
+    s <- Emulator.waitNSlots 5
+
+    Extras.logInfo $ "End of Simulation at slot " ++ show s   
+
+test2 :: IO ()
+test2 = runEmulatorTraceIO $ do
+    better1_wallet <- activateContractWallet (knownWallet 1) endpoints
+    acceptor1_wallet <- activateContractWallet (knownWallet 2) endpoints
+    better2_wallet <- activateContractWallet (knownWallet 3) endpoints
+    acceptor2_wallet <- activateContractWallet (knownWallet 4) endpoints
+    oracle_wallet <- activateContractWallet (knownWallet 5) endpoints
+    
+    
+    callEndpoint @"create" better1_wallet $ CreateParams {
+        create_matchID     = "48656c6c6f204c6f727973",
+        create_closedAt    = 10,
+        create_resultAt    = 20,
+        create_creatorbet  = Win,
+        create_odds        = 150,
+        create_amount      = 50000000
+        }
+    callEndpoint @"create" better2_wallet $ CreateParams {
+        create_matchID     = "48656c6c6f204c6f727973",
+        create_closedAt    = 10,
+        create_resultAt    = 20,
+        create_creatorbet  = Draw,
+        create_odds        = 200,
+        create_amount      = 10000000
+        } 
+    void $ Emulator.waitNSlots 3
+    callEndpoint @"accept" acceptor1_wallet $ AcceptParams {
+        accept_matchID     = "48656c6c6f204c6f727973",
+        accept_creator     = mockWalletPaymentPubKeyHash (knownWallet 1)
+        } 
+    void $ Emulator.waitNSlots 1
+    callEndpoint @"accept" acceptor2_wallet $ AcceptParams {
+        accept_matchID     = "48656c6c6f204c6f727973",
+        accept_creator     = mockWalletPaymentPubKeyHash (knownWallet 3)
+        }  
+
+    void $ Emulator.waitNSlots 20
+    callEndpoint @"oracle" oracle_wallet $ OracleParams {
+        oracle_matchID     = "48656c6c6f204c6f727973",
+        oracle_result     = Loss
+        }  
+    s <- Emulator.waitNSlots 5
+
+    Extras.logInfo $ "End of Simulation at slot " ++ show s   
