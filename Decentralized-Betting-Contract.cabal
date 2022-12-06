@@ -50,7 +50,10 @@ extra-source-files: CHANGELOG.md
 library
     -- Modules exported by the library.
     exposed-modules:  BettingContract,
-                      Test
+                      Types,
+                      Tests,
+                      Utils,
+                      TxConstruction
 
     -- Modules included in this library but not exported.
     -- other-modules:
@@ -80,7 +83,7 @@ library
 
     -- Base language which the package is written in.
     default-language: Haskell2010
-    ghc-options:        -fobject-code -fno-ignore-interface-pragmas -fno-omit-interface-pragmas -fno-strictness -fno-spec-constr -fno-specialise
+    ghc-options:        -Wunused-imports -fobject-code -fno-ignore-interface-pragmas -fno-omit-interface-pragmas -fno-strictness -fno-spec-constr -fno-specialise
 
 executable Decentralized-Betting-Contract
     -- .hs or .lhs file containing the Main module.
