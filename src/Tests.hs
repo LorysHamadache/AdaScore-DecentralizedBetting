@@ -22,6 +22,9 @@ import           Prelude                (IO, show)
 import           Control.Monad.Freer.Extras           as Extras
 import           Control.Monad          hiding (fmap)
 import           PlutusTx.Prelude       hiding (Semigroup(..), unless)
+import           Ledger.TimeSlot
+import           Data.Default           (Default (def))
+
  
 
 
@@ -55,6 +58,48 @@ test1 = runEmulatorTraceIO $ do
     s <- Emulator.waitNSlots 5
 
     Extras.logInfo $ "End of Simulation at slot " ++ show s   
+
+
+--1596059091000
+-- If you use wait until time to todays date -> Crashes (Memory issue?)
+-- WaitUntil Time works
+
+
+-- Trace Config = 
+traceconf :: TraceConfig
+traceconf = def
+
+emulconf :: EmulatorConfig
+emulconf = def{_slotConfig = SlotConfig 1000 0}
+
+
+test1Posix :: IO ()
+test1Posix = runEmulatorTraceIO' traceconf emulconf $ do
+    better1_wallet <- activateContractWallet (knownWallet 1) endpoints
+    acceptor1_wallet <- activateContractWallet (knownWallet 2) endpoints
+    oracle_wallet <- activateContractWallet (knownWallet 5) endpoints
+    s_conf <- getSlotConfig
+
+    callEndpoint @"create" better1_wallet $ CreateParams {
+        create_matchID     = "48656c6c6f204c6f727973",
+        create_closedAt    = 10000,
+        create_resultAt    = 20000,
+        create_creatorbet  = Win,
+        create_odds        = 150,
+        create_amount      = 50000000
+        }
+    t <- Emulator.waitUntilTime 3000
+    callEndpoint @"accept" acceptor1_wallet $ AcceptParams {
+        accept_matchID     = "48656c6c6f204c6f727973",
+        accept_creator     = mockWalletPaymentPubKeyHash (knownWallet 1)
+        } 
+    void $ Emulator.waitNSlots 20
+    callEndpoint @"oracle" oracle_wallet $ OracleParams {
+        oracle_matchID     = "48656c6c6f204c6f727973",
+        oracle_result     = Loss
+        }  
+    s <- Emulator.waitNSlots 1
+    Extras.logInfo $ "End of Simulation at slot " ++ show t
 
 test2 :: IO ()
 test2 = runEmulatorTraceIO $ do
