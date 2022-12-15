@@ -10,6 +10,9 @@
 {-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE DerivingStrategies  #-}
+{-# LANGUAGE StandaloneDeriving  #-}
+{-# LANGUAGE ExistentialQuantification  #-}
+
 
 module Types where
 
@@ -55,12 +58,14 @@ PlutusTx.makeIsDataIndexed ''BetStatus [('AwaitingBet,0), ('AwaitingResult,1)]
 
 ------------------ DATUM ----------------------------------------------------------------------------------------
 
-data BetDatum = 
+--deriving instance forall a (Eq a) => Eq (BetDatum a)
+
+data BetDatum =
     BetDatum
     {
         d_matchID     :: Builtins.BuiltinByteString,
-        d_closedAt    :: Slot,
-        d_resultAt    :: Slot,
+        d_closedAt    :: POSIXTime,
+        d_resultAt    :: POSIXTime,
         d_result      :: MatchBet,
         d_creatorbet  :: MatchBet,
         d_odds        :: Integer,
@@ -72,17 +77,37 @@ data BetDatum =
     }
 PlutusTx.makeIsDataIndexed ''BetDatum [('BetDatum,0)]
 
------------------- REEDEMER ----------------------------------------------------------------------------------------
+instance Eq BetDatum where
+    {-# INLINABLE (==) #-}
+    a == b     =  (d_matchID a == d_matchID b) 
+               && (d_closedAt a == d_closedAt b) 
+               && (d_resultAt a == d_resultAt b) 
+               && (d_result a == d_result b) 
+               && (d_creatorbet a == d_creatorbet b)
+               && (d_odds a == d_odds b)
+               && (d_amount a == d_amount b)
+               && (d_fee a == d_fee b)
+               && (d_creator a == d_creator b)
+               && (d_acceptor a == d_acceptor b)
+               && (d_status a == d_status b)
 
-data BetReedemer = 
-    BetReedemerAccept
+
+
+-- Didnt manage with StandaloneDeriving & ExistentialQuantification as the result is not inline and can't seem to find how to do it
+-- (Eq MatchBet)
+-- deriving instance Eq BetDatum
+
+------------------ Redeemer ----------------------------------------------------------------------------------------
+
+data BetRedeemer = 
+    BetRedeemerAccept
     {
         r_matchID     :: Builtins.BuiltinByteString,
         r_creator     :: PaymentPubKeyHash
-    } | BetReedemerOracle
+    } | BetRedeemerOracle
     {
         r_matchID     :: Builtins.BuiltinByteString,
         r_result      :: MatchBet
     }
-PlutusTx.makeIsDataIndexed ''BetReedemer [('BetReedemerAccept,0),('BetReedemerOracle,1)]
+PlutusTx.makeIsDataIndexed ''BetRedeemer [('BetRedeemerAccept,0),('BetRedeemerOracle,1)]
   

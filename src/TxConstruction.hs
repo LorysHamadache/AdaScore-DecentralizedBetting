@@ -44,8 +44,8 @@ import qualified PlutusTx.Builtins      as Builtins
 data CreateParams = 
     CreateParams {
         create_matchID     :: Builtins.BuiltinByteString,
-        create_closedAt    :: Slot,
-        create_resultAt    :: Slot,
+        create_closedAt    :: POSIXTime,
+        create_resultAt    :: POSIXTime,
         create_creatorbet  :: MatchBet,
         create_odds        :: Integer,
         create_amount      :: Integer
@@ -70,11 +70,11 @@ data OracleParams =
         deriving anyclass (ToJSON, FromJSON, ToSchema)
 
 
-acceptParamsToRedeemer :: AcceptParams -> BetReedemer
-acceptParamsToRedeemer p = BetReedemerAccept {r_creator = accept_creator p , r_matchID = accept_matchID p}
+acceptParamsToRedeemer :: AcceptParams -> BetRedeemer
+acceptParamsToRedeemer p = BetRedeemerAccept {r_creator = accept_creator p , r_matchID = accept_matchID p}
 
-oracleParamsToRedeemer :: OracleParams -> BetReedemer
-oracleParamsToRedeemer p = BetReedemerOracle {r_matchID = oracle_matchID p, r_result = oracle_result p} 
+oracleParamsToRedeemer :: OracleParams -> BetRedeemer
+oracleParamsToRedeemer p = BetRedeemerOracle {r_matchID = oracle_matchID p, r_result = oracle_result p} 
 
 
 -- OFF CHAIN TX CONSTRUCTORS
@@ -111,10 +111,11 @@ accept param = do
     input_datum <- getTxDatum $ snd input
     let output_datum = input_datum{d_acceptor = pkh, d_status = AwaitingResult}
     let tx = mustSpendScriptOutput (fst input) (Redeemer $ PlutusTx.toBuiltinData redeemer) <>
-             mustPayToTheScript (output_datum) (Ada.lovelaceValueOf $ (PlutusTx.Prelude.divide ((d_amount output_datum) * (d_odds output_datum)) 100)+1+ (d_fee output_datum))
+             mustPayToTheScript (output_datum) (Ada.lovelaceValueOf $ (PlutusTx.Prelude.divide ((d_amount output_datum) * (d_odds output_datum)) 100)+1+ (d_fee output_datum)) <>
+             mustValidateIn (to $ d_closedAt input_datum)
     let lookups = Constraints.unspentOutputs accepted_utxos   <> 
                   Constraints.typedValidatorLookups tValidator <> 
-                  Constraints.otherScript validator                                                                               
+                  Constraints.otherScript validator                                                                        
     ledgerTx <- submitTxConstraintsWith @BetType lookups tx                         
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx                                               
     Plutus.Contract.logInfo @String $ "Bet Accepted"                                       
