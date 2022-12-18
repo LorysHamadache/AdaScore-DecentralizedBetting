@@ -19,8 +19,10 @@ import           Control.Monad          hiding (fmap)
 import           Data.Text              (Text,pack)
 import           Plutus.Contract
 import qualified PlutusTx
+import qualified PlutusTx.AssocMap      as Map
 import           PlutusTx.Prelude       hiding (Semigroup(..), unless)
 import           Ledger                 hiding (singleton)
+import qualified Plutus.V1.Ledger.Ada   as Ada
 import           Text.Printf            (printf)
 
 
@@ -48,10 +50,10 @@ isScriptInputValid info betdatum =
         input = getScriptInput $ txInfoInputs info    
 
 
-{-# INLINABLE isScriptInput #-}
-isScriptInput :: TxInInfo -> Bool
-isScriptInput i = 
-    case (txOutDatumHash . txInInfoResolved) i of
+{-# INLINABLE isFromScript #-}
+isFromScript :: TxOut -> Bool
+isFromScript i = 
+    case txOutDatumHash i of
         Nothing -> False
         Just _  -> True
 
@@ -59,12 +61,45 @@ isScriptInput i =
 {-# INLINABLE getScriptInput #-}
 getScriptInput :: [TxInInfo] -> TxInInfo
 getScriptInput i = 
-    case [x | x <- i, isScriptInput x] of
+    case [x | x <- i, isFromScript $ txInInfoResolved x] of
         [y] -> y
         _ -> traceError "Error: Expected 1 script input"
 
 
+{-# INLINABLE getScriptInputValue #-}
+getScriptInputValue :: [TxInInfo] -> Integer
+getScriptInputValue i = Ada.getLovelace $ Ada.fromValue $ txOutValue $ txInInfoResolved $ getScriptInput i
 
+
+{-# INLINABLE getInputAcceptorValue #-}
+getInputAcceptorValue :: [TxInInfo] -> Integer
+getInputAcceptorValue i =  sum nonscript_list
+    where 
+        nonscript_list = map (Ada.getLovelace . Ada.fromValue . txOutValue . txInInfoResolved) (filter (not . isFromScript . txInInfoResolved) i)  
+
+
+{-# INLINABLE getScriptOutput #-}
+getScriptOutput :: [TxOut] -> TxOut
+getScriptOutput i = 
+    case [x | x <- i, isFromScript x] of
+        [y] -> y
+        _ -> traceError "Error: Expected 1 script ouput"
+
+{-# INLINABLE getScriptOutputDatum #-}
+getScriptOutputDatum :: TxInfo -> BetDatum
+getScriptOutputDatum info =
+    case output_datumhash of
+        Nothing -> traceError "Error: Output Datum Hash not found"
+        Just dh -> 
+            case Map.lookup dh map_datum of
+                Nothing -> traceError "Error: Output Datum not found"
+                Just (Datum d) -> 
+                    case (PlutusTx.fromBuiltinData d)::(Maybe BetDatum) of
+                        Nothing -> traceError "Error: Cannot decode Output Datum"
+                        Just x -> x
+    where
+        map_datum = Map.fromList (txInfoData info)
+        output_datumhash = txOutDatumHash $ getScriptOutput $ txInfoOutputs info
 
 
 -- OFF CHAIN HELPER FUNCTIONS  --
