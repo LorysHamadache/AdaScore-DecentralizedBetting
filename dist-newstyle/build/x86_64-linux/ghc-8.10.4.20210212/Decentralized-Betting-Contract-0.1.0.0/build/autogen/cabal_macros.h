@@ -150,6 +150,16 @@
   (major1) == 0 && (major2) <  1 || \
   (major1) == 0 && (major2) == 1 && (minor) <= 0)
 #endif /* MIN_VERSION_plutus_tx_plugin */
+/* package tasty-1.4.2.1 */
+#ifndef VERSION_tasty
+#define VERSION_tasty "1.4.2.1"
+#endif /* VERSION_tasty */
+#ifndef MIN_VERSION_tasty
+#define MIN_VERSION_tasty(major1,major2,minor) (\
+  (major1) <  1 || \
+  (major1) == 1 && (major2) <  4 || \
+  (major1) == 1 && (major2) == 4 && (minor) <= 2)
+#endif /* MIN_VERSION_tasty */
 /* package text-1.2.4.1 */
 #ifndef VERSION_text
 #define VERSION_text "1.2.4.1"

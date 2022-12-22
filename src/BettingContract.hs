@@ -10,6 +10,7 @@
 {-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE DerivingStrategies  #-}
+{-# LANGUAGE NumericUnderscores  #-}
 
 module BettingContract where
 
@@ -24,6 +25,8 @@ import           Text.Printf            (printf)
 import qualified PlutusTx.Builtins.Internal as In
 import           PlutusTx.Builtins
 import qualified Plutus.V1.Ledger.Ada   as Ada
+import           Ledger.Constraints     as Constraints
+import           Ledger.Bytes
 
 
 data BetType
@@ -34,12 +37,15 @@ instance Scripts.ValidatorTypes BetType where
 -- VALIDATOR -- 
 
 {-# INLINABLE mkValidator #-}
-mkValidator :: BetDatum -> BetRedeemer -> ScriptContext -> Bool
-mkValidator datum redeemer scontext = 
-    traceIfFalse "Error: Invalid Script Input" (isScriptInputValid info datum)  -- Check that there is only 1 Script Input & that the Datum is fetchable & decodable
-    && case redeemer of
+mkValidator :: PubKeyHash -> BetDatum -> BetRedeemer -> ScriptContext -> Bool
+mkValidator oracle_pkh' datum redeemer scontext = 
+    traceIfFalse "Error: Input    (Script)   - Script Input Invalid"         (isScriptInputValid info datum) && -- Check that there is only 1 Script Input & that the Datum is fetchable & decodable
+    traceIfFalse "Error: Input    (Datum)    - Incorrect Fee Calculation"    (d_fee datum == PlutusTx.Prelude.divide (d_amount datum * 5) 100 + 2_000_000) &&
+    traceIfFalse "Error: Input    (Redeemer) - MatchID Incorrect"            (r_matchID redeemer == d_matchID datum) &&
+    traceIfFalse "Error: Input    (Datum)    - Creator Bet Incorrect"        (d_creatorbet datum /= Unknown) &&
+    case redeemer of
             (BetRedeemerAccept _ _) -> mkValidatorAccept datum redeemer info
-            (BetRedeemerOracle _ _) -> mkValidatorOracle datum redeemer info
+            (BetRedeemerOracle _ _) -> mkValidatorOracle oracle_pkh' datum redeemer info
     where
         info :: TxInfo
         info = scriptContextTxInfo scontext
@@ -57,46 +63,40 @@ mkValidator datum redeemer scontext =
 --d_acceptor    = pkh,
 --d_status      = AwaitingBet
 
-
+--r_matchID     :: Builtins.BuiltinByteString,
+--r_result      :: MatchBet
+ 
 -- No need to check signing
-{-# INLINABLE mkValidatorAccept #-} -- To check: redeemer correct matchID
+{-# INLINABLE mkValidatorAccept #-}
 mkValidatorAccept :: BetDatum -> BetRedeemer -> TxInfo -> Bool
 mkValidatorAccept datum redeemer info = 
-    -- INPUT PART
-    traceIfFalse "Error: Input    (Datum)    - Incorrect Status"              (AwaitingBet == d_status datum) &&
-    traceIfFalse "Error: Input    (Datum)    - Incorrect Fee Calculation"     (d_fee datum == PlutusTx.Prelude.divide (d_amount datum * 5) 100 + 2000000) &&
-    traceIfFalse "Error: Input    (Redeemer) - MatchID Incorrect"             (r_matchID redeemer == d_matchID datum) &&
+    traceIfFalse "Error: Input    (Datum)    - Incorrect Status"              (AwaitingBet == d_status datum && d_result datum == Unknown) &&
     traceIfFalse "Error: Input    (Redeemer) - Creator Incorrect"             (r_creator redeemer == d_creator datum) &&
     traceIfFalse "Error: Input    (Time)     - Betting Window Closed"         (after (d_closedAt datum) (txInfoValidRange info)) &&
     traceIfFalse "Error: Input    (Script)   - Invalid Value"                 ((getScriptInputValue $ txInfoInputs info) == amountScriptInput) &&
-    traceIfFalse "Error: Input    (Acceptor) - Invalid Value"                 (getInputAcceptorValue (txInfoInputs info) >= acceptorInput) &&
+    traceIfFalse "Error: Input    (Acceptor) - Invalid Value"                 (getInputValue (txInfoInputs info) >= expected_input_value) &&
     traceIfFalse "Error: Output   (Datum)    - Incorrect Datum"               (output_datum{d_acceptor = d_acceptor datum} == datum{d_status = AwaitingResult}) &&
-    traceIfFalse "Error: Output   (Script)   - Invalid Value"                 (output_value == acceptorInput)
+    traceIfFalse "Error: Output   (Script)   - Invalid Value"                 (output_value == expected_input_value)
     where
         amountScriptInput = d_fee datum + d_amount datum
-        acceptorInput = (PlutusTx.Prelude.divide ((d_amount datum) * (d_odds datum)) 100)+1+ (d_fee datum)
+        expected_input_value = (PlutusTx.Prelude.divide ((d_amount datum) * (d_odds datum)) 100)+ (d_fee datum)
         output_datum = getScriptOutputDatum info
         output_value = (Ada.getLovelace . Ada.fromValue) $ txOutValue $ getScriptOutput $ txInfoOutputs info
 
 
+
 {-# INLINABLE mkValidatorOracle #-}
-mkValidatorOracle :: BetDatum -> BetRedeemer -> TxInfo -> Bool
-mkValidatorOracle datum redeemer info = 
-    traceIfFalse "Error: Input (Datum) - Incorrect Status"              (AwaitingResult == d_status datum)
+mkValidatorOracle :: PubKeyHash -> BetDatum -> BetRedeemer -> TxInfo -> Bool
+mkValidatorOracle oracle_pkh' datum redeemer info = --True --traceError $ In.decodeUtf8 $ getPubKeyHash $ head $ (txInfoSignatories info)
+    traceIfFalse "Error: Input (Datum)   - Incorrect Status"              (AwaitingResult == d_status datum) &&
+    traceIfFalse "Error: Input (Oracle)  - Tx not signed by Oracle"       (length (filter (\x ->  getPubKeyHash x == getPubKeyHash oracle_pkh') (txInfoSignatories info)) >= 1)
 
-
-
-
-
-
-    -- traceIfFalse "Hello" False
-    
-    -- traceIfFalse (In.appendString "Hello"  (In.decodeUtf8 $ In.unsafeDataAsB $ PlutusTx.toBuiltinData $ redeemer)) False
 
 
 tValidator :: Scripts.TypedValidator BetType
 tValidator = Scripts.mkTypedValidator @BetType 
-          $$(PlutusTx.compile [|| mkValidator ||])
+          ($$(PlutusTx.compile [|| mkValidator ||])
+            `PlutusTx.applyCode` PlutusTx.liftCode oracle_pkh)
           $$(PlutusTx.compile [|| wrap ||])
     where
         wrap = Scripts.wrapValidator @BetDatum @BetRedeemer
