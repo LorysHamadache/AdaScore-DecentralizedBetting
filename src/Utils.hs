@@ -24,8 +24,18 @@ import           PlutusTx.Prelude       hiding (Semigroup(..), unless)
 import           Ledger                 hiding (singleton)
 import qualified Plutus.V1.Ledger.Ada   as Ada
 import           Text.Printf            (printf)
+import           Wallet.Emulator.Wallet
 
 
+-- GLOBAL CONST
+
+{-# INLINABLE oracle_ppkh #-}
+oracle_ppkh:: PaymentPubKeyHash
+oracle_ppkh = (mockWalletPaymentPubKeyHash $ knownWallet 5) 
+
+{-# INLINABLE oracle_pkh #-}
+oracle_pkh:: PubKeyHash 
+oracle_pkh = "bf342ddd3b1a6191d4ce936c92d29834d6879edf2849eaea84c827f8"
 
 
 -- ON CHAIN HELPER FUNCTIONS
@@ -71,11 +81,11 @@ getScriptInputValue :: [TxInInfo] -> Integer
 getScriptInputValue i = Ada.getLovelace $ Ada.fromValue $ txOutValue $ txInInfoResolved $ getScriptInput i
 
 
-{-# INLINABLE getInputAcceptorValue #-}
-getInputAcceptorValue :: [TxInInfo] -> Integer
-getInputAcceptorValue i =  sum nonscript_list
+{-# INLINABLE getInputValue #-}
+getInputValue :: [TxInInfo] -> Integer
+getInputValue i =  sum input_list
     where 
-        nonscript_list = map (Ada.getLovelace . Ada.fromValue . txOutValue . txInInfoResolved) (filter (not . isFromScript . txInInfoResolved) i)  
+        input_list = map (Ada.getLovelace . Ada.fromValue . txOutValue . txInInfoResolved) i --(filter (not . isFromScript . txInInfoResolved) i)  
 
 
 {-# INLINABLE getScriptOutput #-}

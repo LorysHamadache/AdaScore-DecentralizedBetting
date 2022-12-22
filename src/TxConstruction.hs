@@ -10,6 +10,7 @@
 {-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE DerivingStrategies  #-}
+{-# LANGUAGE NumericUnderscores  #-}
 
 module TxConstruction where
 
@@ -29,7 +30,6 @@ import           Playground.TH          (mkKnownCurrencies, mkSchemaDefinitions)
 import           Playground.Types       (KnownCurrency (..))
 import           Prelude                (Semigroup (..), String)
 import           Text.Printf            (printf)
-import           Wallet.Emulator.Wallet
 import           Prelude                (Show)
 import           Data.Aeson             (FromJSON, ToJSON)
 import           GHC.Generics           (Generic)  
@@ -89,7 +89,7 @@ create param = do
         d_creatorbet  = create_creatorbet param ,
         d_odds        = create_odds param,
         d_amount      = create_amount param ,
-        d_fee         = PlutusTx.Prelude.divide (create_amount param * 5) 100 + 2000000,
+        d_fee         = PlutusTx.Prelude.divide (create_amount param * 5) 100 + 2_000_000,
         d_creator     = pkh,
         d_acceptor    = pkh,
         d_status      = AwaitingBet
@@ -111,7 +111,7 @@ accept param = do
     input_datum <- getTxDatum $ snd input
     let output_datum = input_datum{d_acceptor = pkh, d_status = AwaitingResult}
     let tx = mustSpendScriptOutput (fst input) (Redeemer $ PlutusTx.toBuiltinData redeemer) <>
-             mustPayToTheScript (output_datum) (Ada.lovelaceValueOf $ (PlutusTx.Prelude.divide ((d_amount output_datum) * (d_odds output_datum)) 100)+1+ (d_fee output_datum)) <>
+             mustPayToTheScript (output_datum) (Ada.lovelaceValueOf $ (PlutusTx.Prelude.divide ((d_amount output_datum) * (d_odds output_datum)) 100)+ (d_fee output_datum)) <>
              mustValidateIn (to $ d_closedAt input_datum)
     let lookups = Constraints.unspentOutputs accepted_utxos   <> 
                   Constraints.typedValidatorLookups tValidator <> 
@@ -136,15 +136,15 @@ oracle param = do
     let txcons_output  = mconcat [mustPayToPubKey  (fst otx) (Ada.lovelaceValueOf (snd otx)) | otx <- tx_outputvalues]
 
     tx_outputfees <- PlutusTx.Prelude.mapM (getFeeTx . snd) input_utxos
-    let txfee_output = mconcat [mustPayToPubKey  (mockWalletPaymentPubKeyHash $ knownWallet 5) (Ada.lovelaceValueOf otx) | otx <- tx_outputfees]
+    let txfee_output = mconcat [mustPayToPubKey oracle_ppkh (Ada.lovelaceValueOf otx) | otx <- tx_outputfees]
+    let tx_signature = mustBeSignedBy oracle_ppkh
 
     let lookups = Constraints.unspentOutputs accepted_utxos_map   <> 
                   Constraints.typedValidatorLookups tValidator <> 
                   Constraints.otherScript validator                                                                               
-    ledgerTx <- submitTxConstraintsWith @BetType lookups (txcons_script <> txcons_output <> txfee_output)                         
-    void $ awaitTxConfirmed $ getCardanoTxId ledgerTx                                               
+    ledgerTx <- submitTxConstraintsWith @BetType lookups (txcons_script <> txcons_output <> txfee_output <> tx_signature)                         
+    tx_id <- awaitTxConfirmed $ getCardanoTxId ledgerTx                                               
     Plutus.Contract.logInfo @String $ "Bet Accepted"      
-
 
 ----- SCHEMAS & ENDPOINTS
 

@@ -76,7 +76,8 @@ library
                       plutus-tx -any,
                       plutus-tx-plugin -any,
                       text -any,
-                      lens -any
+                      lens -any,
+                      tasty ^v>=
 
     -- Directories containing source files.
     hs-source-dirs:   src
