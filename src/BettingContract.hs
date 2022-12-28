@@ -39,10 +39,14 @@ instance Scripts.ValidatorTypes BetType where
 {-# INLINABLE mkValidator #-}
 mkValidator :: PubKeyHash -> BetDatum -> BetRedeemer -> ScriptContext -> Bool
 mkValidator oracle_pkh' datum redeemer scontext = 
-    traceIfFalse "Error: Input    (Script)   - Script Input Invalid"         (isScriptInputValid info datum) && -- Check that there is only 1 Script Input & that the Datum is fetchable & decodable
-    traceIfFalse "Error: Input    (Datum)    - Incorrect Fee Calculation"    (d_fee datum == PlutusTx.Prelude.divide (d_amount datum * 5) 100 + 2_000_000) &&
-    traceIfFalse "Error: Input    (Redeemer) - MatchID Incorrect"            (r_matchID redeemer == d_matchID datum) &&
-    traceIfFalse "Error: Input    (Datum)    - Creator Bet Incorrect"        (d_creatorbet datum /= Unknown) &&
+    traceIfFalse  "Error: Input    (Script)   - Script Input Invalid"         (isScriptInputValid info datum) && -- Check that there is only 1 Script Input & that the Datum is fetchable & decodable
+    traceIfFalse  "Error: Input    (Datum)    - Incorrect Fee Calculation"    (d_fee datum == (getFeeCalculation $ d_amount datum)) &&
+    traceIfFalse  "Error: Input    (Redeemer) - MatchID Incorrect"            (r_matchID redeemer == d_matchID datum) &&
+    traceIfFalse  "Error: Input    (Datum)    - Creator Bet Incorrect"        (d_creatorbet datum /= Unknown) &&
+    traceIfFalse  "Error: Input    (Datum)    - Incorrect Odds"               ((d_odds datum)> 100 && (d_odds datum) <= 1000) &&
+    traceIfFalse  "Error: Input    (Datum)    - Amount too low"               (d_amount datum >=  bet_minamount) &&
+    traceIfFalse  "Error: Input    (Datum)    - Incorrect Result Limit"       (d_resultlimAt datum  > d_closedAt datum) &&
+    traceIfFalse  "Error: Input    (Datum)    - Result field incorrect"       (d_result datum == Unknown) &&
     case redeemer of
             (BetRedeemerAccept _ _) -> mkValidatorAccept datum redeemer info
             (BetRedeemerOracle _ _) -> mkValidatorOracle oracle_pkh' datum redeemer info
@@ -53,7 +57,7 @@ mkValidator oracle_pkh' datum redeemer scontext =
 
 --d_matchID     = create_matchID param,
 --d_closedAt    = create_closedAt param,
---d_resultAt    = create_resultAt param,
+--d_resultlimAt    = create_resultAt param,
 --d_result      = Unknown,
 --d_creatorbet  = create_creatorbet param ,
 --d_odds        = create_odds param,
@@ -70,17 +74,17 @@ mkValidator oracle_pkh' datum redeemer scontext =
 {-# INLINABLE mkValidatorAccept #-}
 mkValidatorAccept :: BetDatum -> BetRedeemer -> TxInfo -> Bool
 mkValidatorAccept datum redeemer info = 
-    traceIfFalse "Error: Input    (Datum)    - Incorrect Status"              (AwaitingBet == d_status datum && d_result datum == Unknown) &&
+    traceIfFalse "Error: Input    (Datum)    - Incorrect Status"              (AwaitingBet == d_status datum) &&
     traceIfFalse "Error: Input    (Redeemer) - Creator Incorrect"             (r_creator redeemer == d_creator datum) &&
     traceIfFalse "Error: Input    (Time)     - Betting Window Closed"         (after (d_closedAt datum) (txInfoValidRange info)) &&
     traceIfFalse "Error: Input    (Script)   - Invalid Value"                 ((getScriptInputValue $ txInfoInputs info) == amountScriptInput) &&
-    traceIfFalse "Error: Input    (Acceptor) - Invalid Value"                 (getInputValue (txInfoInputs info) >= expected_input_value) &&
+    traceIfFalse "Error: Input    (Acceptor) - Invalid Value"                 (getInputValue (txInfoInputs info) >= expected_input_value - amountScriptInput) &&
     traceIfFalse "Error: Output   (Datum)    - Incorrect Datum"               (output_datum{d_acceptor = d_acceptor datum} == datum{d_status = AwaitingResult}) &&
     traceIfFalse "Error: Output   (Script)   - Invalid Value"                 (output_value == expected_input_value)
     where
         amountScriptInput = d_fee datum + d_amount datum
         expected_input_value = (PlutusTx.Prelude.divide ((d_amount datum) * (d_odds datum)) 100)+ (d_fee datum)
-        output_datum = getScriptOutputDatum info
+        output_datum = getScriptOutputDatum info -- Technically Check if the Output Datum is Decodable & If only 1 Script
         output_value = (Ada.getLovelace . Ada.fromValue) $ txOutValue $ getScriptOutput $ txInfoOutputs info
 
 
@@ -88,8 +92,14 @@ mkValidatorAccept datum redeemer info =
 {-# INLINABLE mkValidatorOracle #-}
 mkValidatorOracle :: PubKeyHash -> BetDatum -> BetRedeemer -> TxInfo -> Bool
 mkValidatorOracle oracle_pkh' datum redeemer info = --True --traceError $ In.decodeUtf8 $ getPubKeyHash $ head $ (txInfoSignatories info)
-    traceIfFalse "Error: Input (Datum)   - Incorrect Status"              (AwaitingResult == d_status datum) &&
-    traceIfFalse "Error: Input (Oracle)  - Tx not signed by Oracle"       (length (filter (\x ->  getPubKeyHash x == getPubKeyHash oracle_pkh') (txInfoSignatories info)) >= 1)
+    traceIfFalse "Error: Input (Datum)    - Incorrect Status"              (AwaitingResult == d_status datum) &&
+    traceIfFalse "Error: Input (Oracle)   - Tx not signed by Oracle"       (length (filter (\x ->  getPubKeyHash x == getPubKeyHash oracle_pkh') (txInfoSignatories info)) >= 1) &&
+    traceIfFalse "Error: Input (Script)   - Script Value Incorrect"        (expected_input_value == (getScriptInputValue $ txInfoInputs info)) &&
+    traceIfFalse "Error: Input (Redeemer) - Incorrect Result"              (r_result redeemer /= Unknown)
+    --traceIfFalse "Error: Input (Time)     - Betting Window must be closed" (before (d_closedAt datum) (txInfoValidRange info))
+    --traceIfFalse "Error: Input (Time)     - Resutlt Window closed"         (after (d_resultlimAt datum) (txInfoValidRange info))
+    where 
+        expected_input_value = (PlutusTx.Prelude.divide ((d_amount datum) * (d_odds datum)) 100)+ (d_fee datum)
 
 
 

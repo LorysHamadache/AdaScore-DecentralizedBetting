@@ -65,7 +65,7 @@ data BetDatum =
     {
         d_matchID     :: Builtins.BuiltinByteString,
         d_closedAt    :: POSIXTime,
-        d_resultAt    :: POSIXTime,
+        d_resultlimAt    :: POSIXTime,
         d_result      :: MatchBet,
         d_creatorbet  :: MatchBet,
         d_odds        :: Integer,
@@ -81,7 +81,7 @@ instance Eq BetDatum where
     {-# INLINABLE (==) #-}
     a == b     =  (d_matchID a == d_matchID b) 
                && (d_closedAt a == d_closedAt b) 
-               && (d_resultAt a == d_resultAt b) 
+               && (d_resultlimAt a == d_resultlimAt b) 
                && (d_result a == d_result b) 
                && (d_creatorbet a == d_creatorbet b)
                && (d_odds a == d_odds b)

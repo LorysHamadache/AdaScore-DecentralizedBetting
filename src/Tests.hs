@@ -15,6 +15,7 @@
 module Tests where
 
 import           Types
+import           Utils
 import           TxConstruction
 import           Plutus.Trace.Emulator  as Emulator
 import           Wallet.Emulator.Wallet
@@ -58,7 +59,7 @@ trace_normal_acceptor = do
     callEndpoint @"create" better1_wallet $ CreateParams {
         create_matchID     = "48656c6c6f204c6f727973",
         create_closedAt    = 10000,
-        create_resultAt    = 20000,
+        create_resultAt    = 50000,
         create_creatorbet  = Win,
         create_odds        = 150,
         create_amount      = 50000000
@@ -68,7 +69,7 @@ trace_normal_acceptor = do
         accept_matchID     = "48656c6c6f204c6f727973",
         accept_creator     = mockWalletPaymentPubKeyHash (knownWallet 1)
         } 
-    void $ Emulator.waitNSlots 20
+    void $ Emulator.waitNSlots 3
     callEndpoint @"oracle" oracle_wallet $ OracleParams {
         oracle_matchID     = "48656c6c6f204c6f727973",
         oracle_result     = Loss
@@ -93,7 +94,7 @@ test_normal_acceptor = checkPredicateOptions
             where
                 bet_creator = 50_000_000
                 odds = 150
-                fees = PlutusTx.Prelude.divide (bet_creator*5) 100 + 2_000_000
+                fees = getFeeCalculation bet_creator
 
             
 trace_normal_creator::EmulatorTrace ()
@@ -108,7 +109,7 @@ trace_normal_creator = do
     callEndpoint @"create" better1_wallet $ CreateParams {
         create_matchID     = "48656c6c6f204c6f727973",
         create_closedAt    = 10000,
-        create_resultAt    = 20000,
+        create_resultAt    = 50000,
         create_creatorbet  = Win,
         create_odds        = 150,
         create_amount      = 50000000
@@ -118,7 +119,7 @@ trace_normal_creator = do
         accept_matchID     = "48656c6c6f204c6f727973",
         accept_creator     = mockWalletPaymentPubKeyHash (knownWallet 1)
         } 
-    void $ Emulator.waitNSlots 20
+    void $ Emulator.waitNSlots 3
     callEndpoint @"oracle" oracle_wallet $ OracleParams {
         oracle_matchID     = "48656c6c6f204c6f727973",
         oracle_result     = Win
@@ -144,7 +145,7 @@ test_normal_creator = checkPredicateOptions
                 bet_creator = 50_000_000
                 bet_acceptor = PlutusTx.Prelude.divide (bet_creator*odds) 100 - bet_creator
                 odds = 150
-                fees = PlutusTx.Prelude.divide (bet_creator*5) 100 + 2_000_000
+                fees = getFeeCalculation bet_creator
 
 
 
