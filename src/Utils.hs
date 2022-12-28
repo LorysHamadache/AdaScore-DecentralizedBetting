@@ -10,6 +10,7 @@
 {-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE DerivingStrategies  #-}
+{-# LANGUAGE NumericUnderscores  #-}
 
 module Utils where
 
@@ -30,15 +31,32 @@ import           Wallet.Emulator.Wallet
 -- GLOBAL CONST
 
 {-# INLINABLE oracle_ppkh #-}
-oracle_ppkh:: PaymentPubKeyHash
+oracle_ppkh :: PaymentPubKeyHash
 oracle_ppkh = (mockWalletPaymentPubKeyHash $ knownWallet 5) 
 
 {-# INLINABLE oracle_pkh #-}
-oracle_pkh:: PubKeyHash 
+oracle_pkh :: PubKeyHash 
 oracle_pkh = "bf342ddd3b1a6191d4ce936c92d29834d6879edf2849eaea84c827f8"
 
+{-# INLINABLE service_percfee #-}
+service_percfee :: Integer
+service_percfee = 5
+
+{-# INLINABLE service_minfee #-}
+service_minfee :: Integer
+service_minfee = 2_000_000
+
+{-# INLINABLE bet_minamount #-}
+bet_minamount :: Integer
+bet_minamount = 5_000_000
 
 -- ON CHAIN HELPER FUNCTIONS
+
+{-# INLINABLE getFeeCalculation #-}
+getFeeCalculation :: Integer -> Integer
+getFeeCalculation amount = max percent service_minfee
+    where 
+        percent = PlutusTx.Prelude.divide (amount* service_percfee) 100
 
 
 
@@ -55,7 +73,7 @@ isScriptInputValid info betdatum =
             Nothing -> False
             Just (Datum d) -> case (PlutusTx.fromBuiltinData d)::(Maybe BetDatum) of
                 Nothing -> traceError "Error: Cannot decode Datum"
-                Just x -> (x == betdatum )
+                Just x -> (x == betdatum)
     where
         input = getScriptInput $ txInfoInputs info    
 
@@ -141,7 +159,7 @@ resultSlotMatchingUtxo s o = case _ciTxOutDatum o of
     Left _          -> False
     Right (Datum d) -> case PlutusTx.fromBuiltinData d of
         Nothing -> False
-        Just d2 -> s >= (d_resultAt d2)
+        Just d2 -> s >= (d_resultlimAt d2)
 
 
 
