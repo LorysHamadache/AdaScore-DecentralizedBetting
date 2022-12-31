@@ -26,6 +26,8 @@ import           Ledger                 hiding (singleton)
 import qualified Plutus.V1.Ledger.Ada   as Ada
 import           Text.Printf            (printf)
 import           Wallet.Emulator.Wallet
+import           Data.Monoid            (Last (..))
+import           Plutus.Trace.Emulator  as Emulator
 
 
 -- GLOBAL CONST
@@ -105,6 +107,11 @@ getInputValue i =  sum input_list
     where 
         input_list = map (Ada.getLovelace . Ada.fromValue . txOutValue . txInInfoResolved) i --(filter (not . isFromScript . txInInfoResolved) i)  
 
+{-# INLINABLE getTxValueAt #-}
+getTxValueAt :: PaymentPubKeyHash -> [TxOut] -> Integer
+getTxValueAt pkh list = sum $ map (Ada.getLovelace . Ada.fromValue . txOutValue) txs
+    where 
+        txs = filter (\x -> txOutAddress x == pubKeyHashAddress pkh Nothing) list
 
 {-# INLINABLE getScriptOutput #-}
 getScriptOutput :: [TxOut] -> TxOut
@@ -143,6 +150,7 @@ redeemerMatchingUtxo r o = case _ciTxOutDatum o of
                                                ((d_status d2) == AwaitingBet)
                     (BetRedeemerOracle _ _) -> (r_matchID r == (d_matchID d2)) &&
                                                ((d_status d2) == AwaitingResult)
+                    (BetRedeemerClose _) ->    (r_matchID r == (d_matchID d2))              
 
 
 --- UNUSED
@@ -161,7 +169,10 @@ resultSlotMatchingUtxo s o = case _ciTxOutDatum o of
         Nothing -> False
         Just d2 -> s >= (d_resultlimAt d2)
 
-
+getTxIdWriter :: CardanoTx -> Maybe TxId
+getTxIdWriter x = case PlutusTx.Prelude.filter (\x -> isFromScript $ fst x) (getCardanoTxOutRefs x) of
+            [(x,y)] -> Just (txOutRefId $ y)
+            _ -> Nothing
 
 getTxDatum :: ChainIndexTxOut -> Contract w s Text BetDatum
 getTxDatum o = case _ciTxOutDatum o of

@@ -65,7 +65,7 @@ data BetDatum =
     {
         d_matchID     :: Builtins.BuiltinByteString,
         d_closedAt    :: POSIXTime,
-        d_resultlimAt    :: POSIXTime,
+        d_resultlimAt :: POSIXTime,
         d_result      :: MatchBet,
         d_creatorbet  :: MatchBet,
         d_odds        :: Integer,
@@ -108,6 +108,9 @@ data BetRedeemer =
     {
         r_matchID     :: Builtins.BuiltinByteString,
         r_result      :: MatchBet
+    } | BetRedeemerClose
+    {
+        r_matchID     :: Builtins.BuiltinByteString
     }
-PlutusTx.makeIsDataIndexed ''BetRedeemer [('BetRedeemerAccept,0),('BetRedeemerOracle,1)]
+PlutusTx.makeIsDataIndexed ''BetRedeemer [('BetRedeemerAccept,0),('BetRedeemerOracle,1),('BetRedeemerClose,2)]
   
