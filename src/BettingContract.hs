@@ -50,6 +50,7 @@ mkValidator oracle_pkh' datum redeemer scontext =
     case redeemer of
             (BetRedeemerAccept _ _) -> mkValidatorAccept datum redeemer info
             (BetRedeemerOracle _ _) -> mkValidatorOracle oracle_pkh' datum redeemer info
+            (BetRedeemerClose _) -> mkValidatorClose datum redeemer info
     where
         info :: TxInfo
         info = scriptContextTxInfo scontext
@@ -95,12 +96,44 @@ mkValidatorOracle oracle_pkh' datum redeemer info = --True --traceError $ In.dec
     traceIfFalse "Error: Input (Datum)    - Incorrect Status"              (AwaitingResult == d_status datum) &&
     traceIfFalse "Error: Input (Oracle)   - Tx not signed by Oracle"       (length (filter (\x ->  getPubKeyHash x == getPubKeyHash oracle_pkh') (txInfoSignatories info)) >= 1) &&
     traceIfFalse "Error: Input (Script)   - Script Value Incorrect"        (expected_input_value == (getScriptInputValue $ txInfoInputs info)) &&
-    traceIfFalse "Error: Input (Redeemer) - Incorrect Result"              (r_result redeemer /= Unknown)
-    --traceIfFalse "Error: Input (Time)     - Betting Window must be closed" (before (d_closedAt datum) (txInfoValidRange info))
-    --traceIfFalse "Error: Input (Time)     - Resutlt Window closed"         (after (d_resultlimAt datum) (txInfoValidRange info))
-    where 
-        expected_input_value = (PlutusTx.Prelude.divide ((d_amount datum) * (d_odds datum)) 100)+ (d_fee datum)
+    traceIfFalse "Error: Input (Redeemer) - Incorrect Result"              (r_result redeemer /= Unknown) &&
+    traceIfFalse "Error: Input (Time)     - Betting Window must be closed" (before (d_closedAt datum) (txInfoValidRange info)) &&
+    traceIfFalse "Error: Input (Time)     - Result Window closed"          (after (d_resultlimAt datum) (txInfoValidRange info)) &&
+    traceIfFalse "Error: Output (Oracle)  - Incorrect Service Fee Payment" (getTxValueAt (PaymentPubKeyHash oracle_pkh') (txInfoOutputs info) ==
+                                                                            getTxValueAt (PaymentPubKeyHash oracle_pkh') (map txInInfoResolved  (txInfoInputs info)) + (d_fee datum) - bctransaction_fee) &&
+    traceIfFalse "Error: Output (Winner)  - Incorrect Winner Payment"      (getTxValueAt winner_ppkh (txInfoOutputs info) == 
+                                                                            getTxValueAt winner_ppkh (map txInInfoResolved  (txInfoInputs info)) + bet_value)                                                                        
 
+    where 
+        bet_value = (PlutusTx.Prelude.divide ((d_amount datum) * (d_odds datum)) 100)
+        expected_input_value = bet_value+ (d_fee datum)
+        winner_ppkh = if (r_result redeemer == d_creatorbet datum) then d_creator datum else d_acceptor datum
+        bctransaction_fee = Ada.getLovelace . Ada.fromValue $ txInfoFee info
+
+
+
+{-# INLINABLE mkValidatorClose #-}
+mkValidatorClose :: BetDatum -> BetRedeemer -> TxInfo -> Bool
+mkValidatorClose datum redeemer info = 
+    if (d_status datum == AwaitingBet) then
+        traceIfFalse "Error: Input (Script)   - Script Value Incorrect"        (expected_input_value_ab == (getScriptInputValue $ txInfoInputs info)) &&
+        traceIfFalse "Error: Input (Closer)   - Tx not signed by Creator"      (length (filter (\x ->  getPubKeyHash x == (getPubKeyHash $ unPaymentPubKeyHash $ (d_creator datum))) (txInfoSignatories info)) >= 1) &&
+        traceIfFalse "Error: Output (Creator) - Incorrect Refund Creator"      (getTxValueAt (d_creator datum) (txInfoOutputs info) == 
+                                                                                    getTxValueAt (d_creator datum) (map txInInfoResolved  (txInfoInputs info)) + expected_input_value_ab-bctransaction_fee)
+    else if (d_status datum == AwaitingResult) then
+            traceIfFalse "Error: Input (Script)   - Script Value Incorrect"        (expected_input_value_ar == (getScriptInputValue $ txInfoInputs info)) &&
+            traceIfFalse "Error: Input (Closer)   - Tx not signed by Creator"      ((length (filter (\x ->  getPubKeyHash x == (getPubKeyHash $ unPaymentPubKeyHash $ (d_creator datum))) (txInfoSignatories info)) >= 1) ||
+                                                                                   (length (filter (\x ->  getPubKeyHash x == (getPubKeyHash $ unPaymentPubKeyHash $ (d_acceptor datum))) (txInfoSignatories info)) >= 1)) &&
+            traceIfFalse "Error: Output (Creator) - Incorrect Refund Creator"      (getTxValueAt (d_creator datum) (txInfoOutputs info) == 
+                                                                                    getTxValueAt (d_creator datum) (map txInInfoResolved  (txInfoInputs info)) + expected_input_value_ab) &&
+            
+            traceIfFalse "Error: Input (Time)     - Close Window not opened yet"   (before (d_resultlimAt datum) (txInfoValidRange info))
+    else False
+                                
+    where 
+        expected_input_value_ab = (d_amount datum) + (d_fee datum)
+        expected_input_value_ar = (PlutusTx.Prelude.divide ((d_amount datum) * (d_odds datum)) 100)+ (d_fee datum)
+        bctransaction_fee = Ada.getLovelace . Ada.fromValue $ txInfoFee info
 
 
 tValidator :: Scripts.TypedValidator BetType
