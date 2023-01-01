@@ -58,7 +58,6 @@ PlutusTx.makeIsDataIndexed ''BetStatus [('AwaitingBet,0), ('AwaitingResult,1)]
 
 ------------------ DATUM ----------------------------------------------------------------------------------------
 
---deriving instance forall a (Eq a) => Eq (BetDatum a)
 
 data BetDatum =
     BetDatum
