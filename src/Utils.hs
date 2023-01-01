@@ -52,6 +52,9 @@ service_minfee = 2_000_000
 bet_minamount :: Integer
 bet_minamount = 5_000_000
 
+
+
+
 -- ON CHAIN HELPER FUNCTIONS
 
 {-# INLINABLE getFeeCalculation #-}

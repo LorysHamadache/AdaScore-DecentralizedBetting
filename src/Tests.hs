@@ -31,6 +31,10 @@ import           Control.Lens
 import           Test.Tasty
 import           Data.Monoid                  (Last (..))
 
+import           Traces.NormalBehaviorTrace
+import           Traces.CloseBehaviorTrace
+
+
 
 main = defaultMain (testGroup "Expected Behaviors" [grouptest_normal, grouptest_close])
 
@@ -50,51 +54,6 @@ checkopt = defaultCheckOptions & emulatorConfig .~ emulconf
 x=Win
 
 ---------------- NORMAL BEHAVIOR TESTS --------------------
-trace_normal_behavior:: MatchBet -> EmulatorTrace ()
-trace_normal_behavior bres = do
-    ------- INITIALIZATION
-    better1_wallet <- activateContractWallet (knownWallet 1) endpoints
-    acceptor1_wallet <- activateContractWallet (knownWallet 2) endpoints
-    oracle_wallet <- activateContractWallet (knownWallet 5) endpoints
-    s_conf <- getSlotConfig
-    
-    ------- EXECUTION
-    callEndpoint @"create" better1_wallet $ CreateParams {
-        create_matchID     = "48656c6c6f204c6f727973",
-        create_closedAt    = 10_000,
-        create_resultAt    = 50_000,
-        create_creatorbet  = Win,
-        create_odds        = 150,
-        create_amount      = 50_000_000
-        }
-    t <- Emulator.waitUntilTime 3000
-
-    Last creation_scriptTxId <- observableState better1_wallet
-    case creation_scriptTxId of 
-        Nothing -> Extras.logError @String "No Script TxOut TxId"
-        Just x -> do
-            callEndpoint @"accept" acceptor1_wallet (x, AcceptParams {
-                        accept_matchID     = "48656c6c6f204c6f727973",
-                        accept_creator     = mockWalletPaymentPubKeyHash (knownWallet 1)
-                    })
-
-    void $ Emulator.waitUntilTime 15_000     
-
-    Last accept_scriptTxId <- observableState acceptor1_wallet
-    case accept_scriptTxId of 
-        Nothing -> Extras.logError @String "No Script TxOut TxId"
-        Just x -> do
-            callEndpoint @"oracle" oracle_wallet (x, OracleParams{
-                 oracle_matchID     = "48656c6c6f204c6f727973",
-                 oracle_result     = bres
-                 }) 
-
-    s <- Emulator.waitNSlots 1
-
-    Extras.logInfo $ "End of Simulation at slot " ++ show s
-
-test_normal_behaviorIO :: MatchBet -> IO ()
-test_normal_behaviorIO bres = runEmulatorTraceIO' traceconf emulconf (trace_normal_behavior bres)
 
 test_normal_acceptor :: TestTree
 test_normal_acceptor = checkPredicateOptions
@@ -127,83 +86,10 @@ test_normal_creator = checkPredicateOptions
                 odds = 150
                 fees = getFeeCalculation bet_creator
 
+test_normal_behaviorIO :: MatchBet -> IO ()
+test_normal_behaviorIO bres = runEmulatorTraceIO' traceconf emulconf (trace_normal_behavior bres)
+
 ----------------- CLOSE BEHAVIOR TESTS -------------------------
-trace_close_nobet_behavior:: EmulatorTrace ()
-trace_close_nobet_behavior = do
-    ------- INITIALIZATION
-    better1_wallet <- activateContractWallet (knownWallet 1) endpoints
-    acceptor1_wallet <- activateContractWallet (knownWallet 2) endpoints
-    s_conf <- getSlotConfig
-    
-    ------- EXECUTION
-    callEndpoint @"create" better1_wallet $ CreateParams {
-        create_matchID     = "48656c6c6f204c6f727973",
-        create_closedAt    = 10_000,
-        create_resultAt    = 50_000,
-        create_creatorbet  = Win,
-        create_odds        = 150,
-        create_amount      = 50_000_000
-        }
-
-    void $ Emulator.waitUntilTime 3_000
-
-    Last creation_scriptTxId <- observableState better1_wallet
-    case creation_scriptTxId of 
-        Nothing -> Extras.logError @String "No Script TxOut TxId"
-        Just x -> do
-            Extras.logInfo @String "Calling  End"
-            better1_wallet <- activateContractWallet (knownWallet 1) endpoints
-            callEndpoint @"close" better1_wallet (x, CloseParams{
-                        close_matchID     = "48656c6c6f204c6f727973"
-                    })
-
-    s <- Emulator.waitNSlots 1
-    Extras.logInfo $ "End of Simulation at slot " ++ show s
-
-trace_close_nooracle_behavior:: EmulatorTrace ()
-trace_close_nooracle_behavior = do
-    ------- INITIALIZATION
-    better1_wallet <- activateContractWallet (knownWallet 1) endpoints
-    acceptor1_wallet <- activateContractWallet (knownWallet 2) endpoints
-    oracle_wallet <- activateContractWallet (knownWallet 5) endpoints
-    s_conf <- getSlotConfig
-    
-    ------- EXECUTION
-    callEndpoint @"create" better1_wallet $ CreateParams {
-        create_matchID     = "48656c6c6f204c6f727973",
-        create_closedAt    = 10_000,
-        create_resultAt    = 50_000,
-        create_creatorbet  = Win,
-        create_odds        = 150,
-        create_amount      = 50_000_000
-        }
-    t <- Emulator.waitUntilTime 3000
-
-    Last creation_scriptTxId <- observableState better1_wallet
-    case creation_scriptTxId of 
-        Nothing -> Extras.logError @String "No Script TxOut TxId"
-        Just x -> do
-            callEndpoint @"accept" acceptor1_wallet (x, AcceptParams {
-                        accept_matchID     = "48656c6c6f204c6f727973",
-                        accept_creator     = mockWalletPaymentPubKeyHash (knownWallet 1)
-                    })
-
-    void $ Emulator.waitUntilTime 55_000
-
-    Last acceptor_scriptTxId <- observableState acceptor1_wallet
-    case acceptor_scriptTxId of 
-        Nothing -> Extras.logError @String "No Script TxOut TxId"
-        Just x -> do
-            acceptor1_wallet <- activateContractWallet (knownWallet 2) endpoints
-            Extras.logInfo @String "Calling  End"
-            callEndpoint @"close" acceptor1_wallet (x, CloseParams{
-                        close_matchID     = "48656c6c6f204c6f727973"
-                    })   
-
-    s <- Emulator.waitNSlots 1
-
-    Extras.logInfo $ "End of Simulation at slot " ++ show s
-
 
 test_close_nobet_behavior :: TestTree
 test_close_nobet_behavior = checkPredicateOptions
@@ -231,8 +117,6 @@ test_close_nooracle_behavior = checkPredicateOptions
 
 test_close_nobet_behaviorIO:: IO ()
 test_close_nobet_behaviorIO = runEmulatorTraceIO' traceconf emulconf trace_close_nobet_behavior
-
-
 
 
 
