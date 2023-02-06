@@ -15,27 +15,45 @@
 module TxConstruction where
 
 import           Types
-import           BettingContract
 import           Utils
+import           BettingContract
+import           UtilsOnChain
+
 import           Control.Monad          hiding (fmap)
 import           Data.Map               as Map
 import           Data.Text              (Text,pack)
-import           Plutus.Contract
-import qualified PlutusTx
-import           PlutusTx.Prelude       hiding (Semigroup(..), unless)
-import           Ledger                 hiding (singleton)
-import           Ledger.Constraints     as Constraints
-import           Ledger.Ada             as Ada
-import           Playground.TH          (mkKnownCurrencies, mkSchemaDefinitions)
-import           Playground.Types       (KnownCurrency (..))
-import           Prelude                (Semigroup (..), String,uncurry,show)
-import           Text.Printf            (printf)
-import           Prelude                (Show)
-import           Data.Aeson             (FromJSON, ToJSON)
-import           GHC.Generics           (Generic)  
-import           Playground.Contract    (ToSchema)
-import qualified PlutusTx.Builtins      as Builtins
 import           Data.Monoid            (Last (..))
+import           Text.Printf            (printf)
+import           Data.Aeson             (FromJSON, ToJSON)
+import           Data.Tuple.Extra       (uncurry3)
+
+import           PlutusTx
+import           PlutusTx.Prelude       hiding (Semigroup(..), unless)
+import           Plutus.V2.Ledger.Api
+import qualified Plutus.Script.Utils.V2.Typed.Scripts as Scripts
+import qualified Prelude                as Haskell
+import           Prelude                (Semigroup (..))
+import           GHC.Generics           (Generic)
+
+
+import           Ledger                 (minAdaTxOut,interval)
+import           Ledger.Tx             
+import           Ledger.Address
+import qualified Ledger.Ada  as Ada
+import           Ledger.Constraints     as Constraints
+import           Ledger.Bytes
+import           Plutus.V2.Ledger.Tx
+import           Plutus.Contract
+
+
+
+
+--import           Ledger                 hiding (singleton)
+--import           Playground.TH          (mkKnownCurrencies, mkSchemaDefinitions)
+--import           Playground.Types       (KnownCurrency (..))
+--import           Prelude                (Semigroup (..), String,uncurry,show)
+--
+--import qualified PlutusTx.Builtins      as Builtins
 
 
 
@@ -44,54 +62,55 @@ import           Data.Monoid            (Last (..))
 
 data CreateParams = 
     CreateParams {
-        create_matchID     :: Builtins.BuiltinByteString,
+        create_matchID     :: BuiltinByteString,
         create_closedAt    :: POSIXTime,
         create_resultAt    :: POSIXTime,
         create_creatorbet  :: MatchBet,
         create_odds        :: Integer,
         create_amount      :: Integer
         } 
-        deriving stock (Show, Generic)
-        deriving anyclass (ToJSON, FromJSON, ToSchema)
+        deriving stock (Haskell.Show, Generic)
+        deriving anyclass (ToJSON, FromJSON)
 
 data AcceptParams =
     AcceptParams {
-        accept_matchID     :: Builtins.BuiltinByteString,
+        accept_matchID     :: BuiltinByteString,
         accept_creator     :: PaymentPubKeyHash
         }
-        deriving stock (Show, Generic)
-        deriving anyclass (ToJSON, FromJSON, ToSchema)
+        deriving stock (Haskell.Show, Generic)
+        deriving anyclass (ToJSON, FromJSON)
         
 data OracleParams =
     OracleParams {
-        oracle_matchID     :: Builtins.BuiltinByteString,
-        oracle_result      :: MatchBet
+        oracle_matchID     :: BuiltinByteString,
+        oracle_result      :: MatchBet,
+        oracle_end         :: POSIXTime
         }
-        deriving stock (Show, Generic)
-        deriving anyclass (ToJSON, FromJSON, ToSchema)
+        deriving stock (Haskell.Show, Generic)
+        deriving anyclass (ToJSON, FromJSON)
 
 data CloseParams =
     CloseParams {
-        close_matchID     :: Builtins.BuiltinByteString
+        close_matchID     :: BuiltinByteString
     }
-    deriving stock (Show, Generic)
-    deriving anyclass (ToJSON, FromJSON, ToSchema)
+    deriving stock (Haskell.Show, Generic)
+    deriving anyclass (ToJSON, FromJSON)
 
 
 acceptParamsToRedeemer :: AcceptParams -> BetRedeemer
-acceptParamsToRedeemer p = BetRedeemerAccept {r_creator = accept_creator p , r_matchID = accept_matchID p}
-
-oracleParamsToRedeemer :: OracleParams -> BetRedeemer
-oracleParamsToRedeemer p = BetRedeemerOracle {r_matchID = oracle_matchID p, r_result = oracle_result p} 
+acceptParamsToRedeemer p = BetRedeemer {r_creator = accept_creator p , r_matchID = accept_matchID p, r_action = "accept"}
 
 closeParamsToRedeemer :: CloseParams -> BetRedeemer
-closeParamsToRedeemer p = BetRedeemerClose {r_matchID = close_matchID p} 
+closeParamsToRedeemer p = BetRedeemer {r_creator = PaymentPubKeyHash "" ,r_matchID = close_matchID p, r_action = "close"} 
 
+cancelParamsToRedeemer :: CloseParams -> BetRedeemer
+cancelParamsToRedeemer p = BetRedeemer {r_creator = PaymentPubKeyHash "" ,r_matchID = close_matchID p, r_action = "cancel"} 
 
 -- OFF CHAIN TX CONSTRUCTORS
 create :: AsContractError e => CreateParams -> Contract (Last TxId) s e ()
 create param = do
-    pkh <- Plutus.Contract.ownPaymentPubKeyHash
+    Plutus.Contract.logInfo @Haskell.String $ "Create Start" 
+    pkh <- Plutus.Contract.ownFirstPaymentPubKeyHash
     let datum = BetDatum {
         d_matchID     = create_matchID param,
         d_closedAt    = create_closedAt param,
@@ -105,112 +124,126 @@ create param = do
         d_acceptor    = pkh,
         d_status      = AwaitingBet
       }
-    let tx = mustPayToTheScript datum (Ada.lovelaceValueOf $ (d_amount datum + d_fee datum))
+    let tx = mustPayToTheScriptWithInlineDatum datum (Ada.lovelaceValueOf $ (d_amount datum + d_fee datum))
     ledgerTx <- submitTxConstraints tValidator tx
-    void $ awaitTxConfirmed $ getCardanoTxId ledgerTx                                  
-    Plutus.Contract.logInfo @String $ printf "Bet Initialized"
-    let scriptoutput_id = getTxIdWriter ledgerTx
-    Plutus.Contract.logInfo  $ scriptoutput_id
-    tell $ Last $ scriptoutput_id
-
+    let txid = getCardanoTxId ledgerTx
+    void $ awaitTxConfirmed $ txid                            
+    tell $ Last $ Just $ txid
+    Plutus.Contract.logInfo @Haskell.String $ "Create End" 
 
 
 accept :: AsContractError Text => TxId -> AcceptParams -> Contract (Last TxId) s Text ()
 accept txin param = do
-    pkh <- Plutus.Contract.ownPaymentPubKeyHash
+    Plutus.Contract.logInfo @Haskell.String $ "Accept Start" 
+    pkh <- Plutus.Contract.ownFirstPaymentPubKeyHash
     utxos <- utxosAt scrAddress
     let redeemer = acceptParamsToRedeemer param
-    let accepted_utxos1 =  Map.filter (redeemerMatchingUtxo redeemer) utxos       
-    let accepted_utxos =  Map.filterWithKey  (\x _ -> txOutRefId x == txin) accepted_utxos1                                                   
+    let accepted_utxos =  Map.filterWithKey  (\x _ -> txOutRefId x == txin) utxos
     input <- case Map.toList accepted_utxos of
                 [(oref, o)] -> return (oref,o)
                 _ -> Plutus.Contract.throwError $ pack $ printf "Invalid UTXO (too much or no relevant bet)"
-    input_datum <- getTxDatum $ snd input
+    input_datum <-  getTxDatum $ snd input
     let output_datum = input_datum{d_acceptor = pkh, d_status = AwaitingResult}
     let tx = mustSpendScriptOutput (fst input) (Redeemer $ PlutusTx.toBuiltinData redeemer) <>
-             mustPayToTheScript (output_datum) (Ada.lovelaceValueOf $ (PlutusTx.Prelude.divide ((d_amount output_datum) * (d_odds output_datum)) 100)+ (d_fee output_datum)) <>
-             mustValidateIn (to $ (d_closedAt input_datum)- 1)
+             mustPayToTheScriptWithInlineDatum (output_datum) (Ada.lovelaceValueOf $ (PlutusTx.Prelude.divide ((d_amount output_datum) * (d_odds output_datum)) 100)+ (d_fee output_datum)) <>
+             mustValidateIn (to $ (d_closedAt input_datum)-2)
     let lookups = Constraints.unspentOutputs accepted_utxos   <> 
-                  Constraints.typedValidatorLookups tValidator <> 
-                  Constraints.otherScript validator                                                                        
-    ledgerTx <- submitTxConstraintsWith @BetType lookups tx
-    Plutus.Contract.logInfo @String $ "Bet Accepted 31"                      
-    void $ awaitTxConfirmed $ getCardanoTxId ledgerTx                                               
-    Plutus.Contract.logInfo @String $ "Bet Accepted 41"
-
-    let scriptoutput_id = getTxIdWriter ledgerTx
-    Plutus.Contract.logInfo $ scriptoutput_id
-    tell $ Last $ scriptoutput_id                                       
+                  Constraints.typedValidatorLookups tValidator                                                                  
+    Plutus.Contract.logInfo @Haskell.String $ "Accept End" ++ Haskell.show (to $ (d_closedAt input_datum)- 1)
+    ledgerTx <- submitTxConstraintsWith @BetType lookups tx                 
+    let txid = getCardanoTxId ledgerTx
+    Plutus.Contract.logInfo @Haskell.String $ "Accept End" ++ Haskell.show (d_closedAt input_datum)
+    void $ awaitTxConfirmed $ txid
+    tell $ Last $ Just $ txid
+                            
 
 
-oracle :: AsContractError Text => TxId -> OracleParams -> Contract (Last TxId) s Text ()
-oracle txin param = do
-    utxos <- utxosAt scrAddress
-    let redeemer = oracleParamsToRedeemer param
-    let accepted_utxos_map1 = Map.filter (redeemerMatchingUtxo redeemer) utxos  
-    let accepted_utxos_map =  Map.filterWithKey  (\x _ -> txOutRefId x == txin) accepted_utxos_map1  
-    let accepted_utxos = Map.toList $ accepted_utxos_map                                            
-    input <- case accepted_utxos of
-                        [(oref, o)] -> return (oref,o) 
-                        _ -> Plutus.Contract.throwError $ pack $ printf "No UTXO found"
-    let txcons_script  = mustSpendScriptOutput (fst input) (Redeemer $ PlutusTx.toBuiltinData redeemer)
-    tx_outputwinner <- getResultTx (r_result redeemer) (snd input)
-    let txcons_output  = mustPayToPubKey (fst tx_outputwinner) (Ada.lovelaceValueOf (snd tx_outputwinner))
-    tx_outputfees <- (getFeeTx . snd) input
-    let txfee_output = mustPayToPubKey oracle_ppkh (Ada.lovelaceValueOf $ snd tx_outputwinner)
+oracle :: AsContractError Text => OracleParams -> Contract (Last TxId) s Text ()
+oracle param = do
+    Plutus.Contract.logInfo @Haskell.String $ "Oracle Start" 
+    let datum = OracleDatum {
+        o_matchID = oracle_matchID param,
+        o_result = oracle_result param,
+        o_end = oracle_end param
+    }
+    let txcons_oracle  = mustPayToAddressWithInlineDatum oracle_address (Datum $ PlutusTx.toBuiltinData datum) (Ada.toValue minAdaTxOut)
     let tx_signature = mustBeSignedBy oracle_ppkh
+    ledgerTx <- submitTxConstraints tValidator (txcons_oracle <> tx_signature)                                                                   
+    let txid = getCardanoTxId ledgerTx
+    Plutus.Contract.logInfo @Haskell.String $ "Oracle End1"
+    void $ awaitTxConfirmed $ txid                    
+    tell $ Last $ Just $ txid
+    Plutus.Contract.logInfo @Haskell.String $ "Oracle End"  
 
-    input_datum <- getTxDatum $ snd input
-    let tx_validatein = mustValidateIn $ interval (d_closedAt input_datum + 1) (d_resultlimAt input_datum - 1) 
-
-    let lookups = Constraints.unspentOutputs accepted_utxos_map   <> 
-                  Constraints.typedValidatorLookups tValidator <> 
-                  Constraints.otherScript validator                                                                               
-    ledgerTx <- submitTxConstraintsWith @BetType lookups (txcons_script <> txcons_output <> txfee_output <> tx_signature <> tx_validatein)                         
-    tx_id <- awaitTxConfirmed $ getCardanoTxId ledgerTx                                               
-    Plutus.Contract.logInfo @String $ "Oracle Submitted" 
-    let test_output = getTxValueAt oracle_ppkh (PlutusTx.Prelude.map (\(x,y) -> x) (getCardanoTxOutRefs ledgerTx))
-    Plutus.Contract.logInfo $ "Oracle Input Value: " ++ show (test_output)   
-    Plutus.Contract.logInfo $ "Oracle Fee: " ++ show (d_fee input_datum)   
-
-close :: AsContractError Text => TxId -> CloseParams -> Contract (Last TxId) s Text ()
-close txin param = do
-    Plutus.Contract.logInfo @String $ "TEST"  
+cancel :: AsContractError Text => TxId -> CloseParams -> Contract (Last TxId) s Text ()
+cancel txin param = do
+    Plutus.Contract.logInfo @Haskell.String $ "Cancel Start" 
     utxos <- utxosAt scrAddress
-    let redeemer = closeParamsToRedeemer param
-    let accepted_utxos_map1 = Map.filter (redeemerMatchingUtxo redeemer) utxos  
-    let accepted_utxos_map =  Map.filterWithKey  (\x _ -> txOutRefId x == txin) accepted_utxos_map1  
+    pkh <- Plutus.Contract.ownFirstPaymentPubKeyHash
+    let redeemer = cancelParamsToRedeemer param
+    let accepted_utxos_map =  Map.filterWithKey  (\x _ -> txOutRefId x == txin) utxos  
     let accepted_utxos = Map.toList $ accepted_utxos_map
-
     input <- case accepted_utxos of
                         [(oref, o)] -> return (oref,o) 
                         _ -> Plutus.Contract.throwError $ pack $ printf "No UTXO found"
     input_datum <- getTxDatum $ snd input
-    Plutus.Contract.logInfo @String $ "TEST2"  
     let txcons_script  = mustSpendScriptOutput (fst input) (Redeemer $ PlutusTx.toBuiltinData redeemer)
     let txcons_creator  = mustPayToPubKey (d_creator input_datum) (Ada.lovelaceValueOf (d_amount input_datum + d_fee input_datum))
     let txcons_bet = mustPayToPubKey (d_acceptor input_datum) (Ada.lovelaceValueOf (PlutusTx.Prelude.divide ((d_amount input_datum) * (d_odds input_datum - 100)) 100))
-    let tx_validatepostrlim = mustValidateIn  $ from (d_resultlimAt input_datum + 1) 
-    Plutus.Contract.logInfo @String $ "TEST3"  
+    let tx_validatepostrlim = mustValidateIn  $ from (d_resultlimAt input_datum + 1)
+    let tx_signature = mustBeSignedBy pkh
     tx_constraints <-
         case d_status input_datum of
-            AwaitingBet -> return $ txcons_script <> txcons_creator
-            AwaitingResult -> return $ txcons_script <> txcons_creator <> txcons_bet <> tx_validatepostrlim
- 
+            AwaitingBet -> return $ txcons_script <> txcons_creator <> tx_signature
+            AwaitingResult -> return $ txcons_script <> txcons_creator <> txcons_bet <> tx_validatepostrlim <> tx_signature
     let lookups = Constraints.unspentOutputs accepted_utxos_map   <> 
-                  Constraints.typedValidatorLookups tValidator <> 
-                  Constraints.otherScript validator 
-    Plutus.Contract.logInfo @String $ "TEST4"              
-                                                                  
+                  Constraints.typedValidatorLookups tValidator                                                 
     ledgerTx <- submitTxConstraintsWith @BetType lookups tx_constraints 
+    let txid = getCardanoTxId ledgerTx
+    void $ awaitTxConfirmed $ txid                            
+    tell $ Last $ Just $ txid
+    Plutus.Contract.logInfo @Haskell.String $ "Cancel End " 
 
-    Plutus.Contract.logInfo $ "TEST5   :   " ++  show (from (d_closedAt input_datum + 1))
-
-    tx_id <- awaitTxConfirmed $ getCardanoTxId ledgerTx                                               
-    Plutus.Contract.logInfo @String $ "Close Initiated"    
-
-
-
+close :: AsContractError Text => TxId -> TxId -> CloseParams -> Contract (Last TxId) s Text ()
+close txin oracletx param = do
+    Plutus.Contract.logInfo @Haskell.String $ "Close Start"
+    let redeemer = closeParamsToRedeemer param
+    -- GET SCRIPT INPUT
+    utxos <- utxosAt scrAddress
+    pkh <- Plutus.Contract.ownFirstPaymentPubKeyHash
+    let accepted_utxos_map =  Map.filterWithKey  (\x _ -> txOutRefId x == txin) utxos
+    let accepted_utxos = Map.toList $ accepted_utxos_map                              
+    input <- case accepted_utxos of
+                        [(oref, o)] -> return (oref,o) 
+                        _ -> Plutus.Contract.throwError $ pack $ printf "No UTXO found"
+    input_datum <- getTxDatum $ snd input
+    let txcons_script  = mustSpendScriptOutput (fst input) (Redeemer $ PlutusTx.toBuiltinData redeemer)
+    let tx_validatein = mustValidateIn $ interval (d_closedAt input_datum + 1) (d_resultlimAt input_datum - 1) 
+    -- GET ORACLE REFERENCE INPUT
+    utxos_addr <- utxosAt oracle_address
+    let oracleref_utxos = Map.filterWithKey  (\x _ -> txOutRefId x == oracletx) utxos_addr
+    let acceptedoracle_utxos = [head $ Map.toList $ oracleref_utxos]                         
+    input_reforacle <- case acceptedoracle_utxos of
+                        [(oref, o)] -> return (oref,o) 
+                        _ -> Plutus.Contract.throwError $ pack $ printf "No UTXO found"
+    oracle_datum <- getTxDatumOracle $ snd input_reforacle
+    let tx_refinpur = mustReferenceOutput $ fst input_reforacle
+    -- CREATE OUTPUT TO WINNER
+    tx_outputwinner <- getResultTx (o_result oracle_datum) (snd input)
+    let txcons_output  = mustPayToPubKey (fst tx_outputwinner) (Ada.lovelaceValueOf (snd tx_outputwinner))
+    -- CREATE OUTPUT TO SERVICE FEE
+    let tx_outputfees = d_fee $ input_datum
+    let tx_signature = mustBeSignedBy pkh
+    let txfee_output = mustPayToPubKey oracle_ppkh (Ada.lovelaceValueOf $ tx_outputfees)
+    let lookups = Constraints.unspentOutputs accepted_utxos_map   <> 
+                  Constraints.typedValidatorLookups tValidator <>
+                  Constraints.unspentOutputs oracleref_utxos                                                                            
+    ledgerTx <- submitTxConstraintsWith @BetType lookups (txcons_script <> txcons_output <> txfee_output <> tx_validatein <> tx_refinpur <> tx_signature)                                
+    let txid = getCardanoTxId ledgerTx 
+    void $ awaitTxConfirmed $ txid                           
+    tell $ Last $ Just $ txid
+    Plutus.Contract.logInfo @Haskell.String $ "Close End"                                         
+    
 
 
 ----- SCHEMAS & ENDPOINTS
@@ -218,24 +251,25 @@ close txin param = do
 type BettingSchema =
             Endpoint "create" CreateParams  
         .\/ Endpoint "accept" (TxId, AcceptParams)
-        .\/ Endpoint "close"  (TxId, CloseParams)
-        .\/ Endpoint "oracle" (TxId, OracleParams)
+        .\/ Endpoint "cancel" (TxId, CloseParams)
+        .\/ Endpoint "close"  (TxId,TxId,CloseParams)
+        .\/ Endpoint "oracle" OracleParams
 
 
 create_endpoint :: Promise (Last TxId) BettingSchema Text ()
 create_endpoint = endpoint @"create" create
 
 accept_endpoint :: Promise (Last TxId) BettingSchema Text ()
-accept_endpoint = endpoint @"accept" $ Prelude.uncurry accept
+accept_endpoint = endpoint @"accept" $ Haskell.uncurry accept
 
 oracle_endpoint :: Promise (Last TxId) BettingSchema Text ()
-oracle_endpoint = endpoint @"oracle" $ Prelude.uncurry oracle
+oracle_endpoint = endpoint @"oracle" $ oracle
 
 close_endpoint :: Promise (Last TxId) BettingSchema Text ()
-close_endpoint = endpoint @"close" $ Prelude.uncurry close
+close_endpoint = endpoint @"close" $  uncurry3  close
+
+cancel_endpoint :: Promise (Last TxId) BettingSchema Text ()
+cancel_endpoint = endpoint @"cancel" $ Haskell.uncurry cancel
 
 endpoints :: Contract (Last TxId) BettingSchema Text ()
-endpoints = Plutus.Contract.selectList [create_endpoint,accept_endpoint, oracle_endpoint, close_endpoint]
-
-mkSchemaDefinitions ''BettingSchema
-$(mkKnownCurrencies [])
+endpoints = Plutus.Contract.selectList [create_endpoint,accept_endpoint, oracle_endpoint, close_endpoint, cancel_endpoint]
