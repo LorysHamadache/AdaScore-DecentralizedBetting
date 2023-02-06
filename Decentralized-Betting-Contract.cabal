@@ -53,7 +53,8 @@ library
                       Types,
                       Tests,
                       Utils,
-                      TxConstruction
+                      TxConstruction,
+                      Deploy.Deploy
 
     -- Modules included in this library but not exported.
     -- other-modules:
@@ -62,22 +63,47 @@ library
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.14.1.0,
-                      aeson -any,
-                      bytestring -any,
-                      containers -any,
-                      data-default,
-                      freer-extras -any,
-                      playground-common -any,
-                      plutus-contract -any,
-                      plutus-ledger -any,
-                      plutus-ledger-api -any,
-                      plutus-ledger-constraints -any,
-                      plutus-tx -any,
-                      plutus-tx-plugin -any,
-                      text -any,
-                      lens -any,
-                      tasty -any
+    build-depends:    base ^>=4.14.3.0
+                    , bytestring
+                    , cardano-api
+                    , filepath
+                    , plutus-core
+                    , plutus-ledger-api
+                    , plutus-tx
+                    , plutus-tx-plugin
+                    , serialise
+                    , aeson
+                    , plutus-ledger
+                    , plutus-script-utils
+                    , plutus-ledger-constraints
+                    , containers
+                    , text
+                    , plutus-contract
+                    , extra
+                    , freer-extras
+                    , lens
+                    , tasty
+                    , data-default
+                      
+                      
+                      
+                      --aeson -any,
+                      --bytestring -any,
+                      --containers -any,
+                      --data-default,
+                      --freer-extras -any,
+                      --playground-common -any,
+                      --plutus-contract -any,
+                      --plutus-ledger -any,
+                      --plutus-ledger-api -any,
+                      --plutus-ledger-constraints -any,
+                      --plutus-tx -any,
+                      --plutus-tx-plugin -any,
+                      --text -any,
+                      --lens -any,
+                      --tasty -any,
+                      --cardano-api -any,
+                      --serialise
 
     -- Directories containing source files.
     hs-source-dirs:   src

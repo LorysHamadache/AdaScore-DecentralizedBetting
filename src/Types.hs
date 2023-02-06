@@ -12,25 +12,25 @@
 {-# LANGUAGE DerivingStrategies  #-}
 {-# LANGUAGE StandaloneDeriving  #-}
 {-# LANGUAGE ExistentialQuantification  #-}
+{-# LANGUAGE ImportQualifiedPost #-}
 
 
 module Types where
 
-import qualified PlutusTx
-import           Ledger                 hiding (singleton)
-import qualified PlutusTx.Builtins      as Builtins
+import           PlutusTx
 import           PlutusTx.Prelude       hiding (Semigroup(..), unless)
-import           Playground.Contract    (ToSchema)
-import qualified Prelude                as Haskell
+import           Plutus.V2.Ledger.Api
 import           Data.Aeson             (FromJSON, ToJSON)
-import           GHC.Generics           (Generic)     
+import qualified Prelude                as Haskell
+import           GHC.Generics           (Generic)
+import           Ledger.Address
 
 
 ------------------ MatchBet --------------------------------------------------------------------------------------
 
 data MatchBet = Win | Draw | Loss | Unknown
     deriving stock (Haskell.Show, Generic)
-    deriving anyclass (ToJSON, FromJSON, ToSchema)
+    deriving anyclass (ToJSON, FromJSON)
 
 instance Eq MatchBet where
     {-# INLINABLE (==) #-}
@@ -46,7 +46,7 @@ PlutusTx.makeIsDataIndexed ''MatchBet [('Win,0), ('Draw,1), ('Loss,2), ('Unknown
 
 data BetStatus = AwaitingBet | AwaitingResult 
     deriving stock (Haskell.Show, Generic, Haskell.Eq)
-    deriving anyclass (ToJSON, FromJSON, ToSchema)
+    deriving anyclass (ToJSON, FromJSON)
 
 instance Eq BetStatus where
     {-# INLINABLE (==) #-}
@@ -57,12 +57,10 @@ PlutusTx.makeIsDataIndexed ''BetStatus [('AwaitingBet,0), ('AwaitingResult,1)]
 
 
 ------------------ DATUM ----------------------------------------------------------------------------------------
-
-
+ 
 data BetDatum =
-    BetDatum
-    {
-        d_matchID     :: Builtins.BuiltinByteString,
+    BetDatum {
+        d_matchID     :: BuiltinByteString,
         d_closedAt    :: POSIXTime,
         d_resultlimAt :: POSIXTime,
         d_result      :: MatchBet,
@@ -73,8 +71,13 @@ data BetDatum =
         d_creator     :: PaymentPubKeyHash,
         d_acceptor    :: PaymentPubKeyHash,
         d_status      :: BetStatus
+    } |
+    OracleDatum {
+         o_matchID     :: BuiltinByteString,
+         o_result      :: MatchBet,
+         o_end         :: POSIXTime
     }
-PlutusTx.makeIsDataIndexed ''BetDatum [('BetDatum,0)]
+PlutusTx.makeIsDataIndexed ''BetDatum [('BetDatum,0), ('OracleDatum,1)]
 
 instance Eq BetDatum where
     {-# INLINABLE (==) #-}
@@ -91,25 +94,12 @@ instance Eq BetDatum where
                && (d_status a == d_status b)
 
 
-
--- Didnt manage with StandaloneDeriving & ExistentialQuantification as the result is not inline and can't seem to find how to do it
--- (Eq MatchBet)
--- deriving instance Eq BetDatum
-
------------------- Redeemer ----------------------------------------------------------------------------------------
-
 data BetRedeemer = 
-    BetRedeemerAccept
+    BetRedeemer
     {
-        r_matchID     :: Builtins.BuiltinByteString,
-        r_creator     :: PaymentPubKeyHash
-    } | BetRedeemerOracle
-    {
-        r_matchID     :: Builtins.BuiltinByteString,
-        r_result      :: MatchBet
-    } | BetRedeemerClose
-    {
-        r_matchID     :: Builtins.BuiltinByteString
-    }
-PlutusTx.makeIsDataIndexed ''BetRedeemer [('BetRedeemerAccept,0),('BetRedeemerOracle,1),('BetRedeemerClose,2)]
+        r_matchID     :: BuiltinByteString,
+        r_creator     :: PaymentPubKeyHash,
+        r_action      :: BuiltinByteString
+    } 
+PlutusTx.makeIsDataIndexed ''BetRedeemer [('BetRedeemer,0)]
   
