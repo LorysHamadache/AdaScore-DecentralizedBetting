@@ -44,6 +44,7 @@ import           Ledger.Constraints     as Constraints
 import           Ledger.Bytes
 import           Plutus.V2.Ledger.Tx
 import           Plutus.Contract
+import           Ledger.Typed.Scripts
 
 
 
@@ -56,7 +57,17 @@ import           Plutus.Contract
 --import qualified PlutusTx.Builtins      as Builtins
 
 
+scrAddress :: Address
+scrAddress = scriptHashAddress $ validatorHash  validator
 
+tvalidator :: TypedValidator Any
+tvalidator =
+  unsafeMkTypedValidator  (Versioned validator PlutusV2) 
+
+data BetType
+instance Scripts.ValidatorTypes BetType where
+    type instance DatumType BetType = BetDatum
+    type instance RedeemerType BetType = BetRedeemer
 
 -- OFF CHAIN TYPES  -- 
 
@@ -124,8 +135,8 @@ create param = do
         d_acceptor    = pkh,
         d_status      = AwaitingBet
       }
-    let tx = mustPayToTheScriptWithInlineDatum datum (Ada.lovelaceValueOf $ (d_amount datum + d_fee datum))
-    ledgerTx <- submitTxConstraints tValidator tx
+    let tx = mustPayToTheScriptWithInlineDatum (PlutusTx.toBuiltinData datum) (Ada.lovelaceValueOf $ (d_amount datum + d_fee datum))
+    ledgerTx <- submitTxConstraints tvalidator tx
     let txid = getCardanoTxId ledgerTx
     void $ awaitTxConfirmed $ txid                            
     tell $ Last $ Just $ txid
@@ -145,12 +156,12 @@ accept txin param = do
     input_datum <-  getTxDatum $ snd input
     let output_datum = input_datum{d_acceptor = pkh, d_status = AwaitingResult}
     let tx = mustSpendScriptOutput (fst input) (Redeemer $ PlutusTx.toBuiltinData redeemer) <>
-             mustPayToTheScriptWithInlineDatum (output_datum) (Ada.lovelaceValueOf $ (PlutusTx.Prelude.divide ((d_amount output_datum) * (d_odds output_datum)) 100)+ (d_fee output_datum)) <>
+             mustPayToTheScriptWithInlineDatum (PlutusTx.toBuiltinData output_datum) (Ada.lovelaceValueOf $ (PlutusTx.Prelude.divide ((d_amount output_datum) * (d_odds output_datum)) 100)+ (d_fee output_datum)) <>
              mustValidateIn (to $ (d_closedAt input_datum)-2)
     let lookups = Constraints.unspentOutputs accepted_utxos   <> 
-                  Constraints.typedValidatorLookups tValidator                                                                  
+                  Constraints.typedValidatorLookups tvalidator                                                                  
     Plutus.Contract.logInfo @Haskell.String $ "Accept End" ++ Haskell.show (to $ (d_closedAt input_datum)- 1)
-    ledgerTx <- submitTxConstraintsWith @BetType lookups tx                 
+    ledgerTx <- submitTxConstraintsWith lookups tx                 
     let txid = getCardanoTxId ledgerTx
     Plutus.Contract.logInfo @Haskell.String $ "Accept End" ++ Haskell.show (d_closedAt input_datum)
     void $ awaitTxConfirmed $ txid
@@ -168,7 +179,7 @@ oracle param = do
     }
     let txcons_oracle  = mustPayToAddressWithInlineDatum oracle_address (Datum $ PlutusTx.toBuiltinData datum) (Ada.toValue minAdaTxOut)
     let tx_signature = mustBeSignedBy oracle_ppkh
-    ledgerTx <- submitTxConstraints tValidator (txcons_oracle <> tx_signature)                                                                   
+    ledgerTx <- submitTxConstraints tvalidator (txcons_oracle <> tx_signature)                                                                   
     let txid = getCardanoTxId ledgerTx
     Plutus.Contract.logInfo @Haskell.String $ "Oracle End1"
     void $ awaitTxConfirmed $ txid                    
@@ -197,7 +208,7 @@ cancel txin param = do
             AwaitingBet -> return $ txcons_script <> txcons_creator <> tx_signature
             AwaitingResult -> return $ txcons_script <> txcons_creator <> txcons_bet <> tx_validatepostrlim <> tx_signature
     let lookups = Constraints.unspentOutputs accepted_utxos_map   <> 
-                  Constraints.typedValidatorLookups tValidator                                                 
+                  Constraints.plutusV2OtherScript validator                                               
     ledgerTx <- submitTxConstraintsWith @BetType lookups tx_constraints 
     let txid = getCardanoTxId ledgerTx
     void $ awaitTxConfirmed $ txid                            
@@ -236,7 +247,7 @@ close txin oracletx param = do
     let tx_signature = mustBeSignedBy pkh
     let txfee_output = mustPayToPubKey oracle_ppkh (Ada.lovelaceValueOf $ tx_outputfees)
     let lookups = Constraints.unspentOutputs accepted_utxos_map   <> 
-                  Constraints.typedValidatorLookups tValidator <>
+                  Constraints.plutusV2OtherScript validator <>
                   Constraints.unspentOutputs oracleref_utxos                                                                            
     ledgerTx <- submitTxConstraintsWith @BetType lookups (txcons_script <> txcons_output <> txfee_output <> tx_validatein <> tx_refinpur <> tx_signature)                                
     let txid = getCardanoTxId ledgerTx 

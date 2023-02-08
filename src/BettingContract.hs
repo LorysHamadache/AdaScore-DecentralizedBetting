@@ -19,22 +19,15 @@ import           UtilsOnChain
 import           PlutusTx
 import           PlutusTx.Prelude       hiding (Semigroup(..), unless)
 import           Plutus.V2.Ledger.Api
-import qualified Plutus.Script.Utils.V2.Typed.Scripts as Scripts
 import           Ledger.Address
 import qualified Ledger.Ada  as Ada
 import           Plutus.V2.Ledger.Tx
 import           Plutus.V1.Ledger.Interval
 
-data BetType
-instance Scripts.ValidatorTypes BetType where
-    type instance DatumType BetType = BetDatum
-    type instance RedeemerType BetType = BetRedeemer
-  
--- VALIDATOR -- 
-
 {-# INLINABLE mkValidator #-}
-mkValidator :: BetDatum -> BetRedeemer -> ScriptContext -> Bool
-mkValidator datum redeemer scontext =
+mkValidator :: BuiltinData -> BuiltinData -> BuiltinData -> ()
+mkValidator datumData redeemerData scontextData =
+    if (
     traceIfFalse  "Error: Input    (Script)   - Script Input Invalid"      (length scriptinputs == 1) &&
     traceIfFalse  "Error: Input    (Datum)    - Incorrect Fee Calculation" (d_fee datum == (getFeeCalculation $ d_amount datum)) &&
     traceIfFalse  "Error: Input    (Redeemer) - MatchID Incorrect"         (r_matchID redeemer == d_matchID datum) &&
@@ -44,7 +37,16 @@ mkValidator datum redeemer scontext =
     traceIfFalse  "Error: Input    (Datum)    - Incorrect Result Limit"    (d_resultlimAt datum  > d_closedAt datum) &&
     traceIfFalse  "Error: Input    (Datum)    - Result field incorrect"    (d_result datum == Unknown) &&
     validate_action (r_action redeemer)
+    )
+    then ()
+    else error ()
     where
+        datum::BetDatum
+        datum = unsafeFromBuiltinData datumData
+        redeemer::BetRedeemer
+        redeemer = unsafeFromBuiltinData redeemerData
+        scontext::ScriptContext
+        scontext = unsafeFromBuiltinData scontextData
         scriptinputs = filter (isPayToScriptOut) (map txInInfoResolved (txInfoInputs info))
         tx =  (head scriptinputs)
         info = scriptContextTxInfo scontext
@@ -130,22 +132,14 @@ mkValidatorClose datum redeemer info scinput =
         oracle_pkh = PaymentPubKeyHash $ PubKeyHash { getPubKeyHash = (PlutusTx.Prelude.foldr (\x y -> consByteString x y) emptyByteString [191,52,45,221,59,26,97,145,212,206,147,108,146,210,152,52,214,135,158,223,40,73,234,234,132,200,39,248]) }
 
 
-tValidator :: Scripts.TypedValidator BetType
-tValidator = Scripts.mkTypedValidator @BetType 
-          $$(PlutusTx.compile [|| mkValidator ||])
-          $$(PlutusTx.compile [|| wrap ||])
-    where
-        wrap = Scripts.mkUntypedValidator @BetDatum @BetRedeemer
 
 validator :: Validator
-validator = Scripts.validatorScript tValidator
-
-scrAddress :: Address
-scrAddress = Scripts.validatorAddress tValidator    
+validator = mkValidatorScript
+          $$(PlutusTx.compile [|| mkValidator ||])
 
 
 
-
+ 
 
 
 
