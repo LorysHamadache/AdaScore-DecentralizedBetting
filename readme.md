@@ -1,31 +1,121 @@
-# Decentralized Betting
+# AdaScore — Cardano Decentralized Betting
 
-This project, Decentralized Betting, allow people to bet peer to peer without the crushing odds of a bookmaker. Simply create a bet that suits you risk appetite and what you belive is fair odds and let someone accept the bet. The result is provided by a third party via an Oracle.
+This repository contains the full-stack implementation of **AdaScore**, a decentralized peer-to-peer sports betting platform built on **Cardano**.
 
-## Incentives
+Developed as part of the **EMURGO Cardano Developer Program (CDP)**, this project aims to eliminate the unfair advantage of traditional bookmakers by enabling trustless, direct betting between individuals.
 
-** For the bet creator **
+---
 
-1. Create a bet that matches your need, risk profile and wanted gains
-2. It is important to issue a fair bet for someone to be able to accept it. What "fair" is is totally up to you
-3. Create multiple bet across matches to maximize gains without having a bookmaker making sure that your expected gains is under zero.
-4. No censorship, if you win consistently, no centralized party will restrict your potential for betting
+## 🎯 What is AdaScore?
 
-** For the bet acceptor **
+**AdaScore** is a decentralized betting platform that allows users to place **peer-to-peer sports bets** without intermediaries or manipulated odds.  
+Built on **Cardano**, it uses smart contracts to ensure fairness, transparency, and full user control over betting terms.
 
-1. Only bet on matches that fits your wanted odds.
-2. If you cannot find a bet that suits you, create a bet yourself
-3. Fees are paid by the match creator
+---
 
-** For the oracle **
+## 💡 The Core Idea
 
-1. Providing accurate data is totally in the best interest of the oracle as no one will use the platform otherwise
+Traditional betting platforms are centralized entities optimized to guarantee profit at the user's expense, backed by statisticians and risk models.
 
-## To-Do
+**AdaScore flips the model**:
 
-1. Write the first version of the Validator (DONE)
-2. Write All possible test cases (IN PROGESS)
-3. Switch to V2 Code
-4. Study CIP-31 and see if you can work with reference inputs
-5. Add a Close endpoint (no matter if you work with Reference Input or not) (DONE)
-6. Refactor the Utils fonction (a lot do similar stuff but ouput in the Contract Monad)
+- Create your own bet with your **own odds**
+- Let someone else **accept it**
+- The **outcome is resolved** by a trusted third-party oracle
+- The platform is **non-custodial**, **trustless**, and **uncensorable**
+
+---
+
+## 🔐 Incentive Structure
+
+### ✅ For Bet Creators
+
+- Tailor bets to match your **risk appetite** and **expected return**
+- Define your own odds — just ensure they’re **enticing enough** to attract an acceptor
+- Create **multiple bets** to diversify and maximize expected value
+- **No censorship** — even consistent winners are not limited or banned
+
+### ✅ For Bet Acceptors
+
+- Only accept bets with **odds you believe are in your favor**
+- Can't find a good bet? **Post your own**
+- **Fees are paid** by the bet creator
+
+### ✅ For Oracles
+
+- Delivering **accurate match results** is in the oracle’s best interest
+- Integrity ensures continued usage of the platform
+- Oracle behavior is **auditable** and replaceable
+
+---
+
+## 🧱 Tech Stack
+
+| Layer        | Tech                            |
+|--------------|----------------------------------|
+| Smart Contracts | ✅ [Plutus](https://github.com/input-output-hk/plutus) + ✅ [Aiken](https://aiken-lang.org) |
+| Frontend     | ✅ [Next.js](https://nextjs.org/) (React-based)          |
+| Backend/API  | ✅ Google Cloud Functions          |
+| Database     | ✅ Firebase (Firestore)           |
+| Blockchain   | ✅ Cardano (UTxO model)            |
+
+---
+
+## ⚙️ How It Works
+
+1. **Connect** your Cardano wallet
+2. **Browse matches** or **create your own bet**
+3. Set odds and outcome conditions
+4. Wait for another user to **accept** the bet
+5. Match resolves via an **oracle**, funds are automatically settled
+
+---
+
+## 📁 Project Structure
+
+```
+adascore-cardano-decentralized-betting/
+│
+├── contracts/
+│   ├── plutus/        # Plutus smart contracts (original version)
+│   └── aiken/         # Aiken smart contracts (preferred, cleaner syntax)
+│
+├── frontend/          # Next.js app (UI + server-side API routes)
+│
+├── firebase/          # Cloud Functions and Firebase config
+│
+├── docs/              # Diagrams, rationales, PPTs
+│
+└── README.md
+```
+
+---
+
+## 🌐 Platform Advantages
+
+- 🧠 **No bookmaker** bias — compete only against other individuals
+- 🔒 **Non-custodial** — funds are locked in smart contracts
+- 🌍 **Censorship-resistant** — win as much as you want, no bans
+- 🧾 **Transparent rules** — all conditions are verifiable on-chain
+
+---
+
+## 🧠 Future Improvements
+
+- Dynamic oracle integrations
+- Multi-outcome bets (not just win/loss)
+- Match history and player statistics feed
+- Liquidity pool for automated market making
+
+---
+
+## 📄 License
+
+MIT License — see [LICENSE](./LICENSE)
+
+---
+
+## 👤 Author
+
+Developed by [Lorys Hamadache](https://github.com/LorysHamadache)  
+As part of the [EMURGO CDP](https://education.emurgo.io/) Smart Contract Developer Program
