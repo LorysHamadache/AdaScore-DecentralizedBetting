@@ -78,7 +78,7 @@ adascore-cardano-decentralized-betting/
 │
 ├── contracts/              # Plutus and Aiken smart contracts
 ├── front-cloudfunctions/   # Google Cloud Functions for backend logic
-├── front-lucid/            # Lucid-based frontend (likely Next.js or SPA)
+├── front-lucid/            # Lucid-based frontend (Next.js)
 ├── rationale/              # Design rationale and presentation assets
 │
 ├── .gitignore              # Git ignored files
