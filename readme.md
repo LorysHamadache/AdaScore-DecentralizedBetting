@@ -76,17 +76,13 @@ Traditional betting platforms are centralized entities optimized to guarantee pr
 ```
 adascore-cardano-decentralized-betting/
 │
-├── contracts/
-│   ├── plutus/        # Plutus smart contracts (original version)
-│   └── aiken/         # Aiken smart contracts (preferred, cleaner syntax)
+├── contracts/              # Plutus and Aiken smart contracts
+├── front-cloudfunctions/   # Google Cloud Functions for backend logic
+├── front-lucid/            # Lucid-based frontend (likely Next.js or SPA)
+├── rationale/              # Design rationale and presentation assets
 │
-├── frontend/          # Next.js app (UI + server-side API routes)
-│
-├── firebase/          # Cloud Functions and Firebase config
-│
-├── docs/              # Diagrams, rationales, PPTs
-│
-└── README.md
+├── .gitignore              # Git ignored files
+└── README.md               # Project documentation
 ```
 
 ---
